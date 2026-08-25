@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>DQWメモ PiP技術スパイク</title>
+  <style>
+    :root {
+      --bg: #121214;
+      --card-bg: #1e1e24;
+      --primary: #3b82f6;
+      --primary-hover: #2563eb;
+      --text: #f3f4f6;
+      --text-muted: #9ca3af;
+      --border: #374151;
+      --success: #10b981;
+      --error: #ef4444;
+    }
+
+    body {
+      margin: 0;
+      padding: 16px;
+      background-color: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      box-sizing: border-box;
+    }
+
+    .container {
+      max-width: 500px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: col;
+      gap: 16px;
+    }
+
+    h1 {
+      font-size: 1.4rem;
+      margin: 0;
+      color: var(--primary);
+    }
+
+    p {
+      font-size: 0.9rem;
+      color: var(--text-muted);
+      margin: 0;
+      line-height: 1.4;
+    }
+
+    .card {
+      background-color: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .card h2 {
+      font-size: 1.1rem;
+      margin: 0;
+    }
+
+    .btn {
+      background-color: var(--primary);
+      color: white;
+      border: none;
+      padding: 12px 24px;
+      font-size: 1rem;
+      font-weight: bold;
+      border-radius: 8px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      transition: background-color 0.2s;
+    }
+
+    .btn:hover {
+      background-color: var(--primary-hover);
+    }
+
+    .btn:disabled {
+      background-color: var(--border);
+      color: var(--text-muted);
+      cursor: not-allowed;
+    }
+
+    .canvas-container {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background-color: #000;
+      border-radius: 8px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+    }
+
+    canvas {
+      display: block;
+      max-width: 100%;
+      height: auto;
+    }
+
+    .status-badge {
+      padding: 6px 12px;
+      border-radius: 20px;
+      font-size: 0.8rem;
+      font-weight: bold;
+      display: inline-block;
+    }
+
+    .status-badge.inactive {
+      background-color: #374151;
+      color: var(--text-muted);
+    }
+
+    .status-badge.active {
+      background-color: rgba(16, 185, 129, 0.2);
+      color: var(--success);
+      border: 1px solid var(--success);
+    }
+
+    .status-badge.error {
+      background-color: rgba(239, 68, 68, 0.2);
+      color: var(--error);
+      border: 1px solid var(--error);
+    }
+
+    textarea {
+      background-color: #0f0f13;
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px;
+      font-family: monospace;
+      font-size: 0.95rem;
+      resize: none;
+    }
+
+    .log-box {
+      background-color: #0c0c0e;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px;
+      font-family: monospace;
+      font-size: 0.8rem;
+      max-height: 120px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .log-entry {
+      border-left: 2px solid var(--primary);
+      padding-left: 6px;
+    }
+
+    .log-entry.error {
+      border-left-color: var(--error);
+      color: var(--error);
+    }
+
+    .log-entry.success {
+      border-left-color: var(--success);
+      color: var(--success);
+    }
+
+    video {
+      /* 非表示のままにする */
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 1px;
+      height: 1px;
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .hint-box {
+      background-color: rgba(59, 130, 246, 0.1);
+      border-left: 4px solid var(--primary);
+      padding: 12px;
+      border-radius: 0 8px 8px 0;
+      font-size: 0.85rem;
+      line-height: 1.4;
+    }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <div class="card">
+    <h1>DQWメモ PiP技術スパイク</h1>
+    <p>iPhone Safariでの動画PiP表示と、別アプリ（DQW等）切替時の表示維持を検証します。</p>
+  </div>
+
+  <div class="card">
+    <h2>1. 攻略メモ（固定テキスト）</h2>
+    <textarea id="memo-text" rows="5" readonly>【竜王戦 攻略メモ】
+・1T: 防御 ＋ 守りの盾
+・2T: 魔法バフ・全体回復
+・3T: 攻勢（雷光さみだれ突き）
+・4T: 守備低下に備えてスカラ</textarea>
+  </div>
+
+  <div class="card">
+    <h2>2. レンダリングCanvas (640x320)</h2>
+    <div class="canvas-container">
+      <canvas id="memo-canvas" width="640" height="320"></canvas>
+    </div>
+    <div style="display: flex; justify-content: space-between; align-items: center;">
+      <span>PiPステータス:</span>
+      <span id="pip-status" class="status-badge inactive">停止中</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>3. 実行コントロール</h2>
+    <div class="hint-box">
+      <strong>注意:</strong> iOS Safariの仕様上、PiP起動はボタンのタップなどの「ユーザー操作」がトリガーである必要があります。
+    </div>
+    <button id="btn-pip" class="btn">
+      PiPで小窓表示を開始する
+    </button>
+  </div>
+
+  <div class="card">
+    <h2>4. 動作イベントログ</h2>
+    <div id="log-box" class="log-box">
+      <div class="log-entry">システム起動。初期描画完了。</div>
+    </div>
+  </div>
+</div>
+
+<!-- PiP用の非表示Video -->
+<video id="pip-video" muted playsinline></video>
+
+<script>
+  const canvas = document.getElementById('memo-canvas');
+  const ctx = canvas.getContext('2d');
+  const video = document.getElementById('pip-video');
+  const btnPip = document.getElementById('btn-pip');
+  const pipStatus = document.getElementById('pip-status');
+  const memoText = document.getElementById('memo-text').value;
+  const logBox = document.getElementById('log-box');
+
+  function addLog(message, type = '') {
+    const entry = document.createElement('div');
+    entry.className = `log-entry ${type}`;
+    const now = new Date();
+    const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
+    entry.textContent = `[${timeStr}] ${message}`;
+    logBox.appendChild(entry);
+    logBox.scrollTop = logBox.scrollHeight;
+  }
+
+  // Canvas描画関数（固定幅・高解像度意識）
+  function drawCanvas() {
+    // 背景
+    ctx.fillStyle = '#1e1e24';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // 枠
+    ctx.strokeStyle = '#3b82f6';
+    ctx.lineWidth = 6;
+    ctx.strokeRect(3, 3, canvas.width - 6, canvas.height - 6);
+
+    // ヘッダー背景
+    ctx.fillStyle = '#2d2d3a';
+    ctx.fillRect(6, 6, canvas.width - 12, 45);
+
+    // ヘッダータイトル
+    ctx.fillStyle = '#3b82f6';
+    ctx.font = 'bold 20px "Yu Gothic UI", sans-serif';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('🛡️ DQW 攻略メモ (PiP)', 20, 28);
+
+    // 本文テキスト描画
+    ctx.fillStyle = '#f3f4f6';
+    ctx.font = '22px "Yu Gothic UI", sans-serif';
+    ctx.textBaseline = 'top';
+
+    const lines = memoText.split('\n');
+    let startY = 70;
+    const lineHeight = 38;
+
+    lines.forEach((line) => {
+      ctx.fillText(line, 24, startY);
+      startY += lineHeight;
+    });
+  }
+
+  // 初期描画
+  drawCanvas();
+
+  // ビデオのセットアップとStream接続
+  function setupStream() {
+    try {
+      // 30 FPSの動画ストリームをCanvasから抽出
+      const stream = canvas.captureStream(30);
+      video.srcObject = stream;
+      addLog('Canvas.captureStream(30) 成功。Videoに接続完了。', 'success');
+    } catch (e) {
+      addLog(`Stream接続失敗: ${e.message}`, 'error');
+    }
+  }
+
+  setupStream();
+
+  // PiPステータス切り替え
+  function setPipUI(active, isError = false) {
+    if (active) {
+      pipStatus.textContent = 'PiP表示中';
+      pipStatus.className = 'status-badge active';
+      btnPip.textContent = 'PiP小窓を閉じる';
+    } else if (isError) {
+      pipStatus.textContent = '起動失敗';
+      pipStatus.className = 'status-badge error';
+      btnPip.textContent = '再試行';
+    } else {
+      pipStatus.textContent = '停止中';
+      pipStatus.className = 'status-badge inactive';
+      btnPip.textContent = 'PiPで小窓表示を開始する';
+    }
+  }
+
+  // イベントリスナー登録
+  video.addEventListener('enterpictureinpicture', () => {
+    addLog('Event: enterpictureinpicture (PiP開始を検知)', 'success');
+    setPipUI(true);
+  });
+
+  video.addEventListener('leavepictureinpicture', () => {
+    addLog('Event: leavepictureinpicture (PiP終了を検知)');
+    setPipUI(false);
+  });
+
+  // iOS Safari 固有のプレゼンテーションモード変更イベント
+  video.addEventListener('webkitpresentationmodechanged', () => {
+    const mode = video.webkitPresentationMode;
+    addLog(`Event: webkitpresentationmodechanged (モード: ${mode})`);
+    if (mode === 'picture-in-picture') {
+      setPipUI(true);
+    } else {
+      setPipUI(false);
+    }
+  });
+
+  // ボタン押下時のトリガー
+  btnPip.addEventListener('click', async () => {
+    addLog('ユーザー操作によるPiP要求。');
+
+    // すでに開いている場合は閉じる
+    if (document.pictureInPictureElement === video || video.webkitPresentationMode === 'picture-in-picture') {
+      addLog('PiPの終了を要求します。');
+      try {
+        if (video.webkitSetPresentationMode) {
+          video.webkitSetPresentationMode('inline');
+        } else if (document.exitPictureInPicture) {
+          await document.exitPictureInPicture();
+        }
+      } catch (err) {
+        addLog(`PiP終了エラー: ${err.message}`, 'error');
+      }
+      return;
+    }
+
+    // PiPを開始
+    try {
+      // iOSでは、先に一度video.play()を実行して再生状態にする必要があります
+      await video.play();
+      addLog('Video.play() 開始成功。');
+
+      if (video.webkitSetPresentationMode) {
+        addLog('Safari固有の webkitSetPresentationMode("picture-in-picture") を呼び出します。');
+        video.webkitSetPresentationMode('picture-in-picture');
+      } else if (video.requestPictureInPicture) {
+        addLog('標準の requestPictureInPicture() を呼び出します。');
+        await video.requestPictureInPicture();
+      } else {
+        throw new Error('このデバイス/ブラウザはPiPをサポートしていません。');
+      }
+    } catch (err) {
+      addLog(`PiP開始に失敗しました: ${err.message}`, 'error');
+      setPipUI(false, true);
+    }
+  });
+
+  // バックグラウンドでも描画ストリームを維持するためのダミー再生処理
+  setInterval(() => {
+    if (video.webkitPresentationMode === 'picture-in-picture' || document.pictureInPictureElement === video) {
+      // 映像をリフレッシュ（dirtyフラグのような形でCanvasを再描画）
+      drawCanvas();
+    }
+  }, 1000);
+</script>
+
+</body>
+</html>

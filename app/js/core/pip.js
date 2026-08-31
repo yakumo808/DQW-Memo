@@ -5,16 +5,14 @@ export class PipRenderer {
   constructor(canvasId, videoId) {
     this.canvas = document.getElementById(canvasId);
     this.video = document.getElementById(videoId);
-    this.ctx = this.canvas.getContext('2d');
+    this.ctx = this.canvas ? this.canvas.getContext('2d') : null;
     this.stream = null;
     this.isActive = false;
     this.currentMemo = null;
     this.animationFrameId = null;
 
-    if (this.canvas) {
+    if (this.canvas && this.video) {
       this.canvas.style.display = 'none';
-    }
-    if (this.video) {
       this.video.style.display = 'none';
       this.video.muted = true;
       this.video.playsInline = true;
@@ -22,7 +20,7 @@ export class PipRenderer {
   }
 
   init() {
-    if (!this.canvas || !this.video) return;
+    if (!this.canvas || !this.video || !this.ctx) return;
     this.canvas.width = 640;
     this.canvas.height = 320;
     this.stream = this.canvas.captureStream(30);
@@ -31,13 +29,13 @@ export class PipRenderer {
   }
 
   render(memo) {
-    if (!this.currentMemo || !memo) return;
+    if (!this.currentMemo || !memo || !this.ctx) return;
     this.currentMemo = memo;
     this.draw(memo.content);
   }
 
   draw(text) {
-    if (!this.canvas) return;
+    if (!this.canvas || !this.ctx) return;
     const w = this.canvas.width;
     const h = this.canvas.height;
 

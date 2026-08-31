@@ -1,55 +1,49 @@
-// @ts-check
-import { memoRepo } from '../api.js';
+import { MemoRepository } from '../api.js';
 import { ListUI } from './list.js';
 
 export function initList(container) {
   ListUI(container, (id) => {
     if (!id) {
       const newMemo = { title: '', content: '' };
-      memoRepo.save(newMemo);
-      renderEditor(id, null);
+      MemoRepository.save(newMemo);
+      renderEditor(null);
     } else {
-      renderEditor(id, id);
+      renderEditor(id);
     }
   });
 }
 
-function renderEditor(id, currentId) {
+function renderEditor(id) {
   const container = document.getElementById('editor-container');
   if (!container) return;
   
-  // Clear current view
-  container.innerHTML = '';
-  
-  // Editor UI
-  const editor = document.createElement('div');
-  editor.className = 'card';
-  editor.innerHTML = `
-    <h1 class="app-title">メモ編集</h1>
-    <input type="text" id="memo-title" placeholder="タイトル" />
-    <textarea id="memo-content" rows="12" placeholder="メモの内容を入力してください"></textarea>
-    <div class="controls" style="display: flex; gap: 8px; margin-top: 12px;">
-      <button id="btn-save" class="btn btn-success">保存</button>
-      <button id="btn-pip" class.btn btn-primary>PiPで表示</button>
-      <button id="btn-back" class.btn btn-ghost">戻る</button>
+  container.innerHTML = `
+    <div class="card">
+      <h1 class="app-title">メモ編集</h1>
+      <input type="text" id="memo-title" placeholder="タイトル" />
+      <textarea id="memo-content" rows="12" placeholder="メモの内容を入力してください"></textarea>
+      <div class="controls" style="display: flex; gap: 8px; margin-top: 12px;">
+        <button id="btn-save" class="btn btn-success">保存</button>
+        <button id="btn-pip" class="btn btn-primary">PiPで表示</button>
+        <button id="btn-back" class="btn btn-ghost">戻る</button>
+      </div>
+      <div id="status" style="margin-top: 12px; font-size: 0.8rem; color: #9ca3af;"></div>
+      <div id="log-box" class="log-box" style="margin-top: 12px;"></div>
     </div>
-    <div id="status" style="margin-top: 12px; font-size: 0.8rem; color: #9ca3af;"></div>
-    <div id="log-box" class="log-box" style="margin-top: 12px;"></div>
   `;
-  container.appendChild(editor);
 
-  const titleInput = editor.querySelector('#memo-title');
-  const contentInput = editor.querySelector('#memo-content');
-  const btnSave = editor.querySelector('#btn-save');
-  const btnBack = editor.querySelector('#btn-back');
-  const btnPip = editor.querySelector('#btn-pip');
-  const statusEl = editor.querySelector('#status');
-  const logBox = editor.querySelector('#log-box');
+  const titleInput = container.querySelector('#memo-title');
+  const contentInput = container.querySelector('#memo-content');
+  const btnSave = container.querySelector('#btn-save');
+  const btnBack = container.querySelector('#btn-back');
+  const btnPip = container.querySelector('#btn-pip');
+  const statusEl = container.querySelector('#status');
+  const logBox = container.querySelector('#log-box');
 
-  let localMemoId = currentId;
+  let localMemoId = null;
 
-  if (currentId) {
-    const m = memoRepo.getById(currentId);
+  if (id) {
+    const m = MemoRepository.getById(id);
     if (m) {
       titleInput.value = m.title;
       contentInput.value = m.content;
@@ -62,28 +56,61 @@ function renderEditor(id, currentId) {
     const content = contentInput.value;
 
     if (localMemoId) {
-      memoRepo.update(localMemoId, { title, content });
+      MemoRepository.update(localMemoId, { title, content });
     } else {
-      const saved = memoRepo.save({ title, content });
+      const saved = MemoRepository.save({ title, content });
       localMemoId = saved.id;
     }
     
-    // Update local state
-    window.currentMemoId = localMemoId;
-    
-    // UI refresh
     renderList();
-    addLog(`保存完了: ${localMemoId}`);
+    if (logBox) {
+      const entry = document.createElement('div');
+      entry.className = 'log-entry';
+      entry.textContent = `[${new Date().toLocaleTimeString()}] 保存完了`;
+      logBox.appendChild(entry);
+    }
   });
 
   btnBack.addEventListener('click', () => {
-    window.currentMemoId = null;
     renderList();
   });
 
   btnPip.addEventListener('click', () => {
-    // This is handled by the app's PipRenderer integration
-    // For now, we'll just log it.
-    addLog('PiPボタン押下');
+    const m = localMemoId ? MemoRepository.getById(localMemoId) : { 
+      title: titleInput.value, 
+      content: contentInput.value 
+    };
+    
+    // ここでPipRendererをインスタンス化するのではなく、
+    // app.js側で管理するPipRendererに渡す設計にするためのプレースホルダ
+    if (logBox) {
+      const entry = document.createElement('div');
+      entry.className = 'log-entry';
+      entry.textContent = `[${new Date().toLocaleTimeString()}] PiPボタン押下`;
+      logBox.appendChild(entry);
+    }
   });
+}
+
+function renderList() {
+  const container = document.getElementById('list-container');
+  if (!container) return;
+  
+  const todos = MemoRepository.getAll();
+  if (todos.length === 0) {
+    container.innerHTML = `<p style="text-align:center; padding:20px;">メモがありません</p>`;
+    return;
+  }
+  container.innerHTML = todos
+    .sort((a, b) => new Date(b.updated) - new Date(a.updated))
+    .map(m => `
+      <div class="memo-item" data-id="${m.id}">
+        <div class="memo-title">${m.title || '無題'}</div>
+        <div class="memo-date">${new Date(m.updated).toLocaleString()}</div>
+      </div>
+    `).join('');
+
+    container.querySelectorAll('.memo-item').forEach(el => {
+      el.addEventListener('click', () => initList(container)); // ここは実際には編集画面への遷移にする
+    });
 }

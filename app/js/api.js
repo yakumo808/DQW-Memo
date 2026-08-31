@@ -1,16 +1,17 @@
-// @ts-check
-import { MemoRepository } from './api.js';
-
 /**
  * LocalStorage を使用したメモデータのリポジトリ
  */
 export const memoRepo = {
-  getAll() {
-    const raw = localStorage.getItem('dqw_memo_data');
+  STORAGE_KEY: 'dqw_memo_data',
+
+  // 全メモの取得
+  getAll: function() {
+    const raw = localStorage.getItem(this.STORAGE_KEY);
     return raw ? JSON.parse(raw) : [];
   },
 
-  save(memo) {
+  // 新規作成
+  save: function(memo) {
     const todos = this.getAll();
     const newMemo = {
       ...memo,
@@ -18,29 +19,32 @@ export const memoRepo = {
       updated: new Date().toISOString()
     };
     todos.push(newMemo);
-    localStorage.setItem('dqw_memo_data', JSON.stringify(todos));
+    localStorage.setItem(this.STORAGE_KEY, JSON.stringify(todos));
     return newMemo;
   },
 
-  getById(id) {
+  // 特定のメモを取得
+  getById: function(id) {
     const todos = this.getAll();
-    return todos.find(m => m.id === id) || null;
+    return todos.find(function(m) { return m.id === id; }) || null;
   },
 
-  update(id, updatedMemo) {
+  // 更新
+  update: function(id, updatedMemo) {
     const todos = this.getAll();
-    const index = todos.findIndex(m => m.id === id);
+    const index = todos.findIndex(function(m) { return m.id === id; });
     if (index !== -1) {
       todos[index] = { ...todos[index], ...updatedMemo, updated: new Date().toISOString() };
-      localStorage.setItem('dqw_memo_data', JSON.stringify(todos));
+      localStorage.setItem(this.STORAGE_KEY, JSON.stringify(todos));
       return todos[index];
     }
     return null;
   },
 
-  delete(id) {
-    const todos = this.getAll().filter(m => m.id !== id);
-    localStorage.setItem('dqw_memo_data', JSON.stringify(todos));
+  // 削除
+  delete: function(id) {
+    const todos = this.getAll().filter(function(m) { return m.id !== id; });
+    localStorage.setItem(this.STORAGE_KEY, JSON.stringify(todos));
     return true;
   }
 };

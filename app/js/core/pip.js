@@ -1,34 +1,28 @@
-// @ts-check
-import { Memo } from './memo.js';
-
 /**
  * PiP表示のための専用レンダリングエンジン
  */
 export class PipRenderer {
-  private canvas: HTMLCanvasElement;
-  private ctx: CanvasRenderingContext2D;
-  private video: HTMLVideoElement;
-  private stream: MediaStream | null = null;
-  private isActive = false;
-  private currentMemo: Memo | null = null;
-  private animationFrameId: number | null = null;
+  constructor(canvasId, videoId) {
+    this.canvas = document.getElementById(canvasId);
+    this.video = document.getElementById(videoId);
+    this.ctx = this.canvas.getContext('2d');
+    this.stream = null;
+    this.isActive = false;
+    this.currentMemo = null;
+    this.animationFrameId = null;
 
-  constructor(canvasId: string, videoId: string) {
-    this.canvas = document.getElementById(canvasId) as HTMLCanvasElement;
-    this.video = document.getElementById(videoId) as HTMLVideoElement;
-    this.ctx = this.canvas.getContext('2d')!;
-    
-    // 初期状態
-    this.canvas.style.display = 'none';
-    this.video.style.display = 'none';
-    this.video.muted = true;
-    this.video.playsInline = true;
+    if (this.canvas) {
+      this.canvas.style.display = 'none';
+    }
+    if (this.video) {
+      this.video.style.display = 'none';
+      this.video.muted = true;
+      this.video.playsInline = true;
+    }
   }
 
-  /**
-   * 描画の初期セットアップ
-   */
   init() {
+    if (!this.canvas || !this.video) return;
     this.canvas.width = 640;
     this.canvas.height = 320;
     this.stream = this.canvas.captureStream(30);
@@ -36,46 +30,34 @@ export class PipRenderer {
     this.addLog('PipRenderer: Canvas Stream 接続完了');
   }
 
-  /**
-   * メモ内容をCanvasに描画する
-   * @param memo 保存されたメモオブジェクト
-   */
-  render(memo: Memo) {
+  render(memo) {
+    if (!this.currentMemo || !memo) return;
     this.currentMemo = memo;
     this.draw(memo.content);
   }
 
-  /**
-   * Canvasへの描画ロジック（MVP仕様：読みやすさ重視）
-   */
-  private draw(text: string) {
-    if (!this.currentMemo) return;
+  draw(text) {
+    if (!this.canvas) return;
+    const w = this.canvas.width;
+    const h = this.canvas.height;
 
-    const { ctx, canvas } = this;
-    const w = canvas.width;
-    const h = canvas.height;
+    this.ctx.fillStyle = '#1e1e24';
+    this.ctx.fillRect(0, 0, w, h);
 
-    // 背景描画
-    ctx.fillStyle = '#1e1e24';
-    ctx.fillRect(0, 0, w, h);
+    this.ctx.strokeStyle = '#3b82f6';
+    this.ctx.lineWidth = 6;
+    this.ctx.strokeRect(3, 3, w - 6, h - 6);
 
-    // 枠
-    ctx.strokeStyle = '#3b82f6';
-    ctx.lineWidth = 6;
-    ctx.strokeRect(3, 3, w - 6, h - 6);
+    this.ctx.fillStyle = '#2d2d3a';
+    this.ctx.fillRect(6, 6, w - 12, 40);
+    this.ctx.fillStyle = '#3b82f6';
+    this.ctx.font = 'bold 20px "Yu Gothic UI", sans-serif';
+    this.ctx.textBaseline = 'middle';
+    this.ctx.fillText(this.currentMemo.title || 'DQWメモ', w / 2 - 50, 25);
 
-    // タイトル領域
-    ctx.fillStyle = '#2d2d3a';
-    ctx.fillRect(6, 6, w - 12, 40);
-    ctx.fillStyle = '#3b82f6';
-    ctx.font = 'bold 20px "Yu Gothic UI", sans-serif';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(this.currentMemo.title || 'DQWメモ', w / 2 - 50, 25);
-
-    // 本文領域
-    ctx.fillStyle = '#f3f4f6';
-    ctx.font = '20px "Yu Gothic UI", sans-serif';
-    ctx.textBaseline = 'top';
+    this.ctx.fillStyle = '#f3f4f6';
+    this.ctx.font = '20px "Yu Gothic UI", sans-serif';
+    this.ctx.textBaseline = 'top';
 
     const lines = text.split('\n');
     let currentY = 60;
@@ -83,12 +65,11 @@ export class PipRenderer {
 
     lines.forEach((line) => {
       if (currentY + 38 > max_h) {
-        // 簡易的な単語単位の折り返し
         const words = line.split(' ');
         let currentLine = '';
         for (let word of words) {
           if ((currentLine + word).length > 45) {
-            ctx.fillText(currentLine, 30, currentY);
+            this.ctx.fillText(currentLine, 30, currentY);
             currentY += 38;
             currentLine = word + ' ';
           } else {
@@ -96,27 +77,21 @@ export class PipRenderer {
           }
         }
       } else {
-        ctx.fillText(line, 30, currentY);
+        this.ctx.fillText(line, 30, currentY);
         currentY += 38;
       }
     });
 
-    // フッター（更新情報）
-    ctx.font = '14px "Yu Gothic UI", sans-serif';
-    ctx.fillStyle = '#9ca3af';
-    ctx.fillText(`Updated: ${new Date().toLocaleTimeString()}`, 30, h - 15);
+    this.ctx.font = '14px "Yu Gothic UI", sans-serif';
+    this.ctx.fillStyle = '#9ca3af';
+    this.ctx.fillText(`Updated: ${new Date().toLocaleTimeString()}`, 30, h - 15);
   }
 
-  /**
-   * PiPを開始する
-   */
   async startPip() {
-    if (!this.currentMemo) return;
+    if (!this.currentMemo || !this.video) return;
     
     try {
-      // ブラウザの自動再生ポリシーをクリアするため、一度playを呼ぶ
       await this.video.play();
-      
       if (this.video.webkitSetPresentationMode) {
         this.video.webkitSetPresentationMode('picture-in-picture');
       } else if (this.video.requestPictureInPicture) {
@@ -129,24 +104,23 @@ export class PipRenderer {
     }
   }
 
-  /**
-   * PiPを終了する
-   */
   stopPip() {
-    if (this.video.webkitPresentationMode === 'picture-in-picture') {
-      this.video.webkitSetPresentationMode('inline');
-    } else if (document.exitPictureInPicture) {
-      document.exitPictureInPicture();
+    if (this.video) {
+      if (this.video.webkitPresentationMode === 'picture-in-picture') {
+        this.video.webkitSetPresentationMode('inline');
+      } else if (document.exitPictureInPicture) {
+        document.exitPictureInPicture();
+      }
     }
     this.isActive = false;
     this.addLog('PiP終了');
   }
 
-  getIsActive(): boolean {
+  getIsActive() {
     return this.isActive;
   }
 
-  addLog(msg: string) {
+  addLog(msg) {
     const logBox = document.getElementById('log-box');
     if (logBox) {
       const entry = document.createElement('div');

@@ -1,5 +1,6 @@
 // @ts-check
-import { memoRepo } from './api.js';
+import { MemoRepository } from '../api.js';
+import { PipRenderer } from '../core/pip.js';
 
 /**
  * メモ一覧を表示するコンポーネント
@@ -17,17 +18,17 @@ export function ListUI(container, onSelect) {
   const btnNew = container.querySelector('#btn-new');
 
   const render = () => {
-    const memos = memoRepo.getAll();
-    if (memos.length === 0) {
+    const todos = MemoRepository.getAll();
+    if (todos.length === 0) {
       listContainer.innerHTML = `<p style="text-align:center; padding:20px;">メモがありません</p>`;
       return;
     }
-    listContainer.innerHTML = memos
+    listContainer.innerHTML = todos
       .sort((a, b) => new Date(b.updated) - new Date(a.updated))
       .map(m => `
-        <div class="card memo-item" data-id="${m.id}">
-          <div class="memo-title">${m.title || '無題'}</div>
-          <div class="memo-date">${new Date(m.updated).toLocaleString()}</div>
+        <div class.memo-item" data-id="${m.id}">
+          <div class.memo-title">${m.title || '無題'}</div>
+          <div class.memo-date">${new Date(m.updated).toLocaleString()}</div>
         </div>
       `).join('');
 
@@ -37,7 +38,7 @@ export function ListUI(container, onSelect) {
   };
 
   btnNew.addEventListener('click', () => {
-    onSelect(null); // null を渡して新規作成を指示
+    onSelect(null);
   });
 
   render();

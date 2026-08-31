@@ -1,6 +1,4 @@
 // @ts-check
-import { MemoRepository } from './api.js';
-
 /**
  * メモデータモデル
  */

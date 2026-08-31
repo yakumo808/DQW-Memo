@@ -1,6 +1,5 @@
 // @ts-check
 import { MemoRepository } from '../api.js';
-import { PipRenderer } from '../core/pip.js';
 
 /**
  * メモ一覧を表示するコンポーネント
@@ -26,9 +25,9 @@ export function ListUI(container, onSelect) {
     listContainer.innerHTML = todos
       .sort((a, b) => new Date(b.updated) - new Date(a.updated))
       .map(m => `
-        <div class.memo-item" data-id="${m.id}">
-          <div class.memo-title">${m.title || '無題'}</div>
-          <div class.memo-date">${new Date(m.updated).toLocaleString()}</div>
+        <div class="memo-item" data-id="${m.id}">
+          <div class="memo-title">${m.title || '無題'}</div>
+          <div class="memo-date">${new Date(m.updated).toLocaleString()}</div>
         </div>
       `).join('');
 

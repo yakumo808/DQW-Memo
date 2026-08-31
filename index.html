@@ -6,62 +6,14 @@
   <title>DQWメモ MVP</title>
   <link rel="stylesheet" href="app/css/style.css">
 </head>
-<body>
-  <div id="app" class.app-container>
-    <!-- UI コンポーネントがここに注入される -->
+<body class="app-container">
+  <div id="app"></div>
+  <!-- PiP用のDOMを固定で配置 -->
+  <div id="pip-container" style="display:none; position:fixed; bottom:20px; right:20px; z-index:9999;">
+    <canvas id="pip-canvas"></canvas>
+    <video id="pip-video" muted playsinline></video>
+    <div id="log-box" class="log-box"></div>
   </div>
-
-  <script type="module">
-    import { ListUI } from './app/js/ui/list.js';
-    import { EditorUI } from './app/js/ui/editor.js';
-    import { memoRepo } from './app/js/api.js';
-
-    const appContainer = document.getElementById('app');
-    let currentView = null;
-
-    const renderList = () => {
-      appContainer.innerHTML = '';
-      appContainer.appendChild(ListUI(appContainer, (id) => {
-        if (!id) {
-          // 新規作成
-          const newMemo = { title: '', content: '' };
-          const saved = memoRepo.save(newMemo);
-          app.setView('editor', saved.id);
-        } else {
-          // 編集
-          app.setView('editor', id);
-        }
-      }));
-    };
-
-    const renderEditor = (id) => {
-      appContainer.innerHTML = '';
-      appContainer.appendChild(EditorUI(appContainer, () => {
-        app.setView('list');
-      }, id));
-    };
-
-    const app = {
-      setView(view, id = null) {
-        currentView = view;
-        if (view === 'list') {
-          renderList();
-        } else if (view === 'editor') {
-          if (id) {
-            const m = memoRepo.getById(id);
-            renderEditor(id);
-          } else {
-            renderEditor(null);
-          }
-        }
-      }
-    };
-
-    // 初期表示
-    app.setView('list');
-    
-    // 開発用デバッグログ（必要に応じて）
-    console.log('MVP App Initialized');
-  </script>
+  <script type="module" src="./app/js/app.js"></script>
 </body>
 </html>

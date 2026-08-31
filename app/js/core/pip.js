@@ -29,9 +29,10 @@ export class PipRenderer {
   }
 
   render(memo) {
-    if (!this.currentMemo || !memo || !this.ctx) return;
+    // 修正点: currentMemo が null の状態でも memo があれば描画処理へ進む
+    if (!memo || !this.ctx) return;
     this.currentMemo = memo;
-    this.draw(memo.content);
+    this.draw(this.currentMemo.content);
   }
 
   draw(text) {

@@ -1,7 +1,7 @@
 /**
  * LocalStorage を使用したメモデータのリポジトリ
  */
-export const memoRepo = {
+export const MemoRepository = {
   STORAGE_KEY: 'dqw_memo_data',
 
   // 全メモの取得

@@ -12,24 +12,32 @@ export class PipRenderer {
     this.animationFrameId = null;
 
     if (this.canvas && this.video) {
-      this.canvas.style.display = 'none';
-      this.video.style.display = 'none';
+      // ビデオ要素をDOM上で有効な状態にする
+      this.video.style.display = 'block';
       this.video.muted = true;
       this.video.playsInline = true;
+      this.addLog('PipRenderer: 初期化完了 (videoはDOM上で有効)');
     }
   }
 
   init() {
-    if (!this.canvas || !this.video || !this.ctx) return;
+    if (!this.canvas || !this.video || !this.ctx) {
+      this.addLog('PipRenderer: 初期化失敗 (要素不足)');
+      return;
+    }
     this.canvas.width = 640;
     this.canvas.height = 320;
-    this.stream = this.canvas.captureStream(30);
-    this.video.srcObject = this.stream;
-    this.addLog('PipRenderer: Canvas Stream 接続完了');
+
+    try {
+      this.stream = this.canvas.captureStream(30);
+      this.video.srcObject = this.stream;
+      this.addLog(`PipRenderer: Canvas Stream 接続完了 (readyState: ${this.video.readyState}, paused: ${this.video.paused}, error: ${this.video.error})`);
+    } catch (e) {
+      this.addLog(`PipRenderer: Canvas Stream 接続失敗: ${e.name} - ${e.message}`);
+    }
   }
 
   render(memo) {
-    // 修正点: currentMemo が null の状態でも memo があれば描画処理へ進む
     if (!memo || !this.ctx) return;
     this.currentMemo = memo;
     this.draw(this.currentMemo.content);
@@ -87,17 +95,43 @@ export class PipRenderer {
   }
 
   async startPip() {
-    if (!this.currentMemo || !this.video) return;
-    
+    if (!this.currentMemo || !this.video) {
+      this.addLog('PiP開始失敗: メモまたはビデオ要素がありません');
+      return;
+    }
+
     try {
-      await this.video.play();
-      if (this.video.webkitSetPresentationMode) {
+      // ビデオ要素を表示（既に block ならそのまま、none なら block にする）
+      this.video.style.display = 'block';
+
+      const canSupportWebKit =
+        this.video.webkitSupportsPresentationMode &&
+        this.video.webkitSupportsPresentationMode('picture-in-picture') &&
+        typeof this.video.webkitSetPresentationMode === 'function';
+
+      const canSupportStandard =
+        document.pictureInPictureEnabled &&
+        typeof this.video.requestPictureInPicture === 'function';
+
+      if (canSupportWebKit) {
         this.video.webkitSetPresentationMode('picture-in-picture');
-      } else if (this.video.requestPictureInPicture) {
+
+        // WebKitは同期的な変化を返すため、少し待機して実際の状態を確認する
+        setTimeout(() => {
+          if (this.video.webkitPresentationMode === 'picture-in-picture') {
+            this.isActive = true;
+            this.addLog('PiP開始成功 (WebKit)');
+          } else {
+            this.addLog('PiP開始失敗 (WebKit): webkitPresentationMode が変化しません');
+          }
+        }, 200);
+      } else if (canSupportStandard) {
         await this.video.requestPictureInPicture();
+        this.isActive = true;
+        this.addLog('PiP開始成功 (Standard)');
+      } else {
+        this.addLog('PiP開始失敗: 対応するAPIが見つかりませんでした。');
       }
-      this.isActive = true;
-      this.addLog('PiP開始成功');
     } catch (e) {
       this.addLog(`PiP開始失敗: ${e.name} - ${e.message}`);
     }
@@ -110,6 +144,7 @@ export class PipRenderer {
       } else if (document.exitPictureInPicture) {
         document.exitPictureInPicture();
       }
+      this.video.style.display = 'none';
     }
     this.isActive = false;
     this.addLog('PiP終了');

@@ -8,12 +8,14 @@
 </head>
 <body class="app-container">
   <div id="app"></div>
-  <!-- PiP用のDOMを固定で配置 -->
-  <div id="pip-container" style="display:none; position:fixed; bottom:20px; right:20px; z-index:9999;">
+
+  <!-- PiP用のDOM。display:noneを解除し、オフスクリーンに配置する -->
+  <div id="pip-container" style="position:fixed; bottom:-9999px; right:-9999px; z-index:-1;">
     <canvas id="pip-canvas"></canvas>
     <video id="pip-video" muted playsinline></video>
     <div id="log-box" class="log-box"></div>
   </div>
+
   <script type="module" src="./app/js/app.js"></script>
 </body>
 </html>

@@ -1,0 +1,7 @@
+__pycache__/
+*.py[cod]
+*.pyo
+.memos.json
+memos.json
+*.tmp
+.DS_Store

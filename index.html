@@ -9,12 +9,27 @@
 <body class="app-container">
   <div id="app"></div>
 
-  <!-- PiP用のDOM。display:noneを解除し、オフスクリーンに配置する -->
-  <div id="pip-container" style="position:fixed; bottom:-9999px; right:-9999px; z-index:-1;">
-    <canvas id="pip-canvas"></canvas>
-    <video id="pip-video" muted playsinline></video>
-    <div id="log-box" class="log-box"></div>
+  <!-- 案A floating: DOMは残すが既定未使用 -->
+  <div id="floating-memo-root" class="floating-memo-root" hidden></div>
+
+  <!--
+    Phase 3.1: 通常 mp4 用 video（Spike 002 と同型）。
+    canvas.captureStream は正式経路外。canvas はデバッグ用に残置可。
+  -->
+  <div id="pip-container" style="position:fixed; left:0; bottom:0; width:160px; height:90px; opacity:0.05; overflow:hidden; pointer-events:none; z-index:1;">
+    <canvas id="pip-canvas" width="640" height="320" style="display:none"></canvas>
+    <video
+      id="pip-video"
+      muted
+      playsinline
+      webkit-playsinline
+      loop
+      preload="metadata"
+      src="./spikes/002-ios-video-pip/sample.mp4"
+    ></video>
   </div>
+
+  <div id="log-box" class="log-box" style="position:fixed; left:0; right:0; bottom:0; max-height:22vh; overflow:auto; font-size:11px; line-height:1.3; background:rgba(0,0,0,0.75); color:#86efac; z-index:10000; padding:6px; pointer-events:auto;"></div>
 
   <script type="module" src="./app/js/app.js"></script>
 </body>

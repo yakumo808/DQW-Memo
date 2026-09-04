@@ -7,7 +7,15 @@ export const MemoRepository = {
   // 全メモの取得
   getAll: function() {
     const raw = localStorage.getItem(this.STORAGE_KEY);
-    return raw ? JSON.parse(raw) : [];
+    if (!raw) return [];
+
+    try {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (error) {
+      console.error('メモデータの読み込みに失敗しました', error);
+      return [];
+    }
   },
 
   // 新規作成

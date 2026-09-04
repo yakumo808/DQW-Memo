@@ -22,18 +22,26 @@ export function ListUI(container, onSelect) {
       listContainer.innerHTML = `<p style="text-align:center; padding:20px;">メモがありません</p>`;
       return;
     }
-    listContainer.innerHTML = todos
+    listContainer.replaceChildren();
+    todos
       .sort((a, b) => new Date(b.updated) - new Date(a.updated))
-      .map(m => `
-        <div class="memo-item" data-id="${m.id}">
-          <div class="memo-title">${m.title || '無題'}</div>
-          <div class="memo-date">${new Date(m.updated).toLocaleString()}</div>
-        </div>
-      `).join('');
+      .forEach(m => {
+        const item = document.createElement('div');
+        item.className = 'memo-item';
+        item.dataset.id = m.id;
 
-    listContainer.querySelectorAll('.memo-item').forEach(el => {
-      el.addEventListener('click', () => onSelect(el.dataset.id));
-    });
+        const title = document.createElement('div');
+        title.className = 'memo-title';
+        title.textContent = m.title || '無題';
+
+        const date = document.createElement('div');
+        date.className = 'memo-date';
+        date.textContent = new Date(m.updated).toLocaleString();
+
+        item.append(title, date);
+        item.addEventListener('click', () => onSelect(m.id));
+        listContainer.appendChild(item);
+      });
   };
 
   btnNew.addEventListener('click', () => {

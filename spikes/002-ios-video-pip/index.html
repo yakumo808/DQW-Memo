@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <title>Spike 002 — iOS Video PiP</title>
+  <style>
+    :root { color-scheme: dark; }
+    body {
+      margin: 0;
+      padding: 16px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+      line-height: 1.45;
+    }
+    h1 { font-size: 1.15rem; margin: 0 0 8px; color: #93c5fd; }
+    .note { font-size: 0.8rem; color: #94a3b8; margin-bottom: 12px; }
+    video {
+      width: 100%;
+      max-width: 640px;
+      background: #000;
+      border-radius: 8px;
+      display: block;
+    }
+    .row { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+    button {
+      flex: 1;
+      min-width: 7rem;
+      padding: 14px 12px;
+      font-size: 1rem;
+      font-weight: 600;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+    #btn-play { background: #2563eb; color: #fff; }
+    #btn-pip { background: #059669; color: #fff; }
+    #btn-stop { background: #334155; color: #e2e8f0; }
+    .meta, #log {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.72rem;
+      background: #020617;
+      border: 1px solid #1e293b;
+      border-radius: 8px;
+      padding: 10px;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+    .meta { margin-top: 12px; color: #cbd5e1; }
+    #log { margin-top: 8px; max-height: 40vh; overflow: auto; color: #86efac; }
+    .ok { color: #4ade80; }
+    .err { color: #f87171; }
+  </style>
+</head>
+<body>
+  <h1>Spike 002: 通常 mp4 → システム PiP</h1>
+  <p class="note">
+    canvas.captureStream / MediaStream 不使用。短い静的 mp4 のみ。
+    Desktop Chrome と iPhone Safari で再生 → PiP → DQW 切替を確認する。
+  </p>
+
+  <video
+    id="v"
+    src="./sample.mp4"
+    playsinline
+    webkit-playsinline
+    muted
+    controls
+    loop
+    preload="metadata"
+  ></video>
+
+  <div class="row">
+    <button type="button" id="btn-play">1. 再生</button>
+    <button type="button" id="btn-pip">2. PiP 開始</button>
+    <button type="button" id="btn-stop">PiP 終了</button>
+  </div>
+
+  <div class="meta" id="meta">loading…</div>
+  <div id="log"></div>
+
+  <script>
+    (function () {
+      const video = document.getElementById('v');
+      const metaEl = document.getElementById('meta');
+      const logEl = document.getElementById('log');
+
+      function ts() {
+        return new Date().toLocaleTimeString();
+      }
+
+      function log(msg, cls) {
+        const line = document.createElement('div');
+        if (cls) line.className = cls;
+        line.textContent = '[' + ts() + '] ' + msg;
+        logEl.appendChild(line);
+        logEl.scrollTop = logEl.scrollHeight;
+        try { console.log(msg); } catch (_) {}
+      }
+
+      function videoUrl() {
+        try {
+          return video.currentSrc || video.src || '(none)';
+        } catch (_) {
+          return '(error reading src)';
+        }
+      }
+
+      function refreshMeta(label) {
+        const pipEl = document.pictureInPictureElement;
+        let webkitMode = '(n/a)';
+        try {
+          if ('webkitPresentationMode' in video) {
+            webkitMode = String(video.webkitPresentationMode);
+          }
+        } catch (e) {
+          webkitMode = 'err:' + e.message;
+        }
+
+        metaEl.textContent = [
+          'label: ' + (label || '-'),
+          'url: ' + videoUrl(),
+          'readyState: ' + video.readyState + ' (0=NOTHING .. 4=ENOUGH)',
+          'networkState: ' + video.networkState,
+          'paused: ' + video.paused,
+          'ended: ' + video.ended,
+          'muted: ' + video.muted,
+          'videoWidth: ' + video.videoWidth,
+          'videoHeight: ' + video.videoHeight,
+          'currentTime: ' + (video.currentTime || 0).toFixed(2),
+          'duration: ' + (isFinite(video.duration) ? video.duration.toFixed(2) : String(video.duration)),
+          'error: ' + (video.error ? (video.error.code + ' ' + (video.error.message || '')) : 'null'),
+          'pictureInPictureEnabled: ' + document.pictureInPictureEnabled,
+          'pictureInPictureElement===video: ' + (pipEl === video),
+          'webkitPresentationMode: ' + webkitMode,
+          'webkitSupportsPresentationMode: ' +
+            (typeof video.webkitSupportsPresentationMode === 'function'
+              ? String(video.webkitSupportsPresentationMode('picture-in-picture'))
+              : 'n/a')
+        ].join('\n');
+      }
+
+      ['loadedmetadata', 'loadeddata', 'canplay', 'canplaythrough', 'play', 'playing', 'pause', 'error', 'emptied'].forEach(function (ev) {
+        video.addEventListener(ev, function () {
+          log('event:' + ev + ' readyState=' + video.readyState +
+            ' w=' + video.videoWidth + ' h=' + video.videoHeight);
+          refreshMeta('event:' + ev);
+        });
+      });
+
+      video.addEventListener('enterpictureinpicture', function () {
+        log('enterpictureinpicture', 'ok');
+        refreshMeta('enterpictureinpicture');
+      });
+      video.addEventListener('leavepictureinpicture', function () {
+        log('leavepictureinpicture');
+        refreshMeta('leavepictureinpicture');
+      });
+      if (video.addEventListener) {
+        video.addEventListener('webkitpresentationmodechanged', function () {
+          log('webkitpresentationmodechanged mode=' + video.webkitPresentationMode);
+          refreshMeta('webkitpresentationmodechanged');
+        });
+      }
+
+      document.getElementById('btn-play').addEventListener('click', async function () {
+        refreshMeta('play-click');
+        log('play() 要求 url=' + videoUrl());
+        try {
+          video.muted = true;
+          const p = video.play();
+          if (p && typeof p.then === 'function') await p;
+          log('play() 成功 paused=' + video.paused +
+            ' readyState=' + video.readyState +
+            ' w=' + video.videoWidth + ' h=' + video.videoHeight, 'ok');
+        } catch (e) {
+          log('play() 失敗: ' + e.name + ' - ' + e.message, 'err');
+        }
+        refreshMeta('after-play');
+      });
+
+      document.getElementById('btn-pip').addEventListener('click', async function () {
+        refreshMeta('pip-click');
+        log('PiP 開始要求 readyState=' + video.readyState +
+          ' w=' + video.videoWidth + ' h=' + video.videoHeight);
+
+        if (video.readyState < 1 || video.videoWidth === 0) {
+          log('中止: メタデータ未確立 (readyState=' + video.readyState +
+            ', videoWidth=' + video.videoWidth + ')。PiP API は呼びません。', 'err');
+          refreshMeta('pip-aborted-no-metadata');
+          return;
+        }
+
+        try {
+          if (video.paused) {
+            video.muted = true;
+            const p = video.play();
+            if (p && typeof p.then === 'function') await p;
+            log('PiP前 play() OK');
+          }
+
+          const canWebKit =
+            typeof video.webkitSupportsPresentationMode === 'function' &&
+            video.webkitSupportsPresentationMode('picture-in-picture') &&
+            typeof video.webkitSetPresentationMode === 'function';
+
+          const canStandard =
+            document.pictureInPictureEnabled === true &&
+            typeof video.requestPictureInPicture === 'function';
+
+          log('API webkit=' + canWebKit + ' standard=' + canStandard +
+            ' pictureInPictureEnabled=' + document.pictureInPictureEnabled);
+
+          if (canWebKit) {
+            video.webkitSetPresentationMode('picture-in-picture');
+            await new Promise(function (r) { setTimeout(r, 300); });
+            const mode = video.webkitPresentationMode;
+            log('webkitPresentationMode=' + mode);
+            if (mode === 'picture-in-picture') {
+              log('PiP開始成功 (WebKit) — 実際の mode を確認', 'ok');
+            } else {
+              log('PiP開始失敗 (WebKit): mode が picture-in-picture ではない', 'err');
+            }
+          } else if (canStandard) {
+            await video.requestPictureInPicture();
+            await new Promise(function (r) { setTimeout(r, 100); });
+            const match = document.pictureInPictureElement === video;
+            log('pictureInPictureElement===video: ' + match);
+            if (match) {
+              log('PiP開始成功 (Standard) — pictureInPictureElement 確認', 'ok');
+            } else {
+              log('PiP開始失敗 (Standard): element 不一致', 'err');
+            }
+          } else {
+            log('PiP開始失敗: 対応 API なし', 'err');
+          }
+        } catch (e) {
+          log('PiP例外: ' + e.name + ' - ' + e.message, 'err');
+        }
+        refreshMeta('after-pip');
+      });
+
+      document.getElementById('btn-stop').addEventListener('click', async function () {
+        try {
+          if (video.webkitPresentationMode === 'picture-in-picture' &&
+              typeof video.webkitSetPresentationMode === 'function') {
+            video.webkitSetPresentationMode('inline');
+            log('webkit → inline');
+          } else if (document.pictureInPictureElement && document.exitPictureInPicture) {
+            await document.exitPictureInPicture();
+            log('exitPictureInPicture');
+          } else {
+            log('終了対象の PiP なし');
+          }
+        } catch (e) {
+          log('PiP終了例外: ' + e.name + ' - ' + e.message, 'err');
+        }
+        refreshMeta('after-stop-pip');
+      });
+
+      log('init url=' + videoUrl());
+      refreshMeta('init');
+      // 明示 load（iOS で metadata を促す）
+      try { video.load(); } catch (_) {}
+    })();
+  </script>
+</body>
+</html>

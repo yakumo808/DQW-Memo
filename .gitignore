@@ -1,0 +1,8 @@
+# dependencies / local verification only — never commit
+node_modules/
+scripts/
+pip-chrome-verify.json
+floating-verify.json
+floating-integration.json
+*.log
+.DS_Store

@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>D-4A IndexedDB Video Cache Spike</title>
+  <style>
+    :root { color-scheme: dark; }
+    body { margin: 0; font-family: system-ui, sans-serif; background: #111827; color: #e5e7eb; }
+    .wrap { max-width: 980px; margin: 0 auto; padding: 24px; display: grid; gap: 16px; }
+    .grid { display: grid; gap: 12px; grid-template-columns: 1fr 1fr; }
+    .card { border: 1px solid #374151; border-radius: 16px; padding: 16px; background: #0f172a; }
+    label { display: block; font-size: 12px; color: #9ca3af; margin-bottom: 6px; }
+    input, textarea, button { width: 100%; box-sizing: border-box; border-radius: 12px; border: 1px solid #374151; background: #111827; color: #e5e7eb; padding: 10px 12px; }
+    textarea { min-height: 180px; resize: vertical; }
+    button { background: #2563eb; border-color: #3b82f6; cursor: pointer; font-weight: 600; }
+    button.secondary { background: #1f2937; }
+    button.danger { background: #7f1d1d; }
+    .row { display: grid; gap: 10px; }
+    .status { color: #93c5fd; white-space: pre-wrap; }
+    .log { max-height: 260px; overflow: auto; white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px; background: #020617; border-radius: 12px; padding: 12px; border: 1px solid #1f2937; }
+    video { width: 100%; max-width: 640px; background: #000; border-radius: 12px; }
+    .small { font-size: 12px; color: #9ca3af; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <h1>D-4A IndexedDB Video Cache Spike</h1>
+      <div class="small">render API → fetch(videoUrl) → blob → IndexedDB → blob URL → video 再生</div>
+    </div>
+
+    <div class="grid">
+      <div class="card row">
+        <div>
+          <label for="title">title</label>
+          <input id="title" type="text" value="D-4A Cache Test" />
+        </div>
+        <div>
+          <label for="content">content</label>
+          <textarea id="content">IndexedDB に MP4 Blob を保存します\n1行目\n2行目\n改行も表示されます</textarea>
+        </div>
+        <div class="row" style="grid-template-columns: 1fr 1fr 1fr;">
+          <button id="btn-run">D-4A 実行</button>
+          <button id="btn-load" class="secondary">キャッシュから再生</button>
+          <button id="btn-delete" class="danger">キャッシュ削除</button>
+        </div>
+        <div id="status" class="status">idle</div>
+      </div>
+
+      <div class="card row">
+        <div>
+          <label>video</label>
+          <video id="video" controls muted playsinline preload="metadata"></video>
+        </div>
+        <div class="small">readyState / size / duration は実機再生で確認</div>
+        <div id="meta" class="small"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <label>log</label>
+      <div id="log" class="log"></div>
+    </div>
+  </div>
+
+  <script type="module" src="./main.js"></script>
+</body>
+</html>

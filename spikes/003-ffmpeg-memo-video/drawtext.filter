@@ -1,0 +1,1 @@
+drawtext=fontfile='C\:/Windows/Fonts/NotoSansJP-VF.ttf':textfile='memo.txt':fontsize=28:fontcolor=white:line_spacing=10:x=(w-text_w)/2:y=(h-text_h)/2:shadowcolor=black@0.75:shadowx=2:shadowy=2:fix_bounds=1

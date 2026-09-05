@@ -31,6 +31,9 @@ const renderState = {
 };
 
 let editorDraft = { title: '', content: '' };
+let requestGeneration = 0;
+// One video element/controller: never share an in-flight prepare across requests.
+let prepareQueue = Promise.resolve();
 
 const normalizeDraft = (draft) => ({
   title: (draft && draft.title) || '',
@@ -44,8 +47,21 @@ const makeSignature = (draft) => {
 
 const currentSignature = () => makeSignature(editorDraft);
 
-async function computeContentHash(signature) {
-  return signature;
+function snapshotRequest() {
+  return Object.freeze({
+    memoId: state.selectedMemo?.id ?? null,
+    title: editorDraft.title,
+    content: editorDraft.content,
+    hash: currentSignature(),
+    generation: requestGeneration,
+  });
+}
+
+function isCurrentRequest(request) {
+  return request.generation === requestGeneration &&
+    state.currentView === 'editor' &&
+    request.memoId === (state.selectedMemo?.id ?? null) &&
+    request.title === editorDraft.title && request.content === editorDraft.content;
 }
 
 function resetPreparedState() {
@@ -73,10 +89,9 @@ function revokeCurrentObjectUrl() {
 }
 
 function invalidateReadyState() {
-  if (renderState.status === 'ready' || renderState.status === 'error' || renderState.status === 'idle') {
-    revokeCurrentObjectUrl();
-    resetPreparedState();
-  }
+  requestGeneration += 1;
+  revokeCurrentObjectUrl();
+  resetPreparedState();
   syncEditorUi();
 }
 
@@ -129,33 +144,39 @@ function syncEditorUi() {
   if (editorApi.setPipLabel) editorApi.setPipLabel(pipLabel());
 }
 
-async function loadBlobIntoVideo(blob, hash, prepareSource, meta) {
+function loadBlobIntoVideo(blob, request, prepareSource, meta) {
+  const pending = prepareQueue.then(() => prepareBlob(blob, request, prepareSource, meta));
+  prepareQueue = pending.catch(() => {});
+  return pending;
+}
+
+async function prepareBlob(blob, request, prepareSource, meta) {
+  if (!isCurrentRequest(request)) return;
+  const { hash } = request;
   if (!(blob instanceof Blob) || blob.size <= 0) {
     throw new Error('invalid blob');
   }
 
-  const previousObjectUrl = renderState.objectUrl;
   const nextObjectUrl = URL.createObjectURL(blob);
-  renderState.objectUrl = nextObjectUrl;
   log(`${prepareSource.toUpperCase()} OBJECT URL ${nextObjectUrl}`);
 
-  const prep = await videoPip.prepare(nextObjectUrl);
-  if (!prep.ok) {
-    try {
+  let applied = false;
+  try {
+    const prep = await videoPip.prepare(nextObjectUrl);
+    if (!isCurrentRequest(request)) return;
+    if (!prep.ok) throw new Error(prep.message || 'prepare failed');
+    revokeCurrentObjectUrl();
+    renderState.objectUrl = nextObjectUrl;
+    applied = true;
+  } finally {
+    if (!applied) {
+      // Only this request owns this URL. Newer prepare waits for this cleanup.
+      const v = videoPip.video;
+      if (v && v.getAttribute('src') === nextObjectUrl) {
+        v.removeAttribute('src');
+        v.load();
+      }
       URL.revokeObjectURL(nextObjectUrl);
-    } catch (_) {
-      /* ignore */
-    }
-    renderState.objectUrl = previousObjectUrl;
-    throw new Error(prep.message || 'prepare failed');
-  }
-
-  if (previousObjectUrl) {
-    try {
-      URL.revokeObjectURL(previousObjectUrl);
-      log(`Object URL revoked: ${previousObjectUrl}`);
-    } catch (_) {
-      /* ignore */
     }
   }
 
@@ -176,8 +197,9 @@ async function loadBlobIntoVideo(blob, hash, prepareSource, meta) {
   }
 }
 
-async function renderAndPrepareFromServer(hash) {
-  const { title, content } = editorDraft;
+async function renderAndPrepareFromServer(request) {
+  if (!isCurrentRequest(request)) return;
+  const { title, content, hash } = request;
   renderState.status = 'rendering';
   renderState.failurePhase = 'render';
   renderState.errorMessage = '';
@@ -185,12 +207,7 @@ async function renderAndPrepareFromServer(hash) {
   syncEditorUi();
 
   const result = await renderMemoVideo({ title, content });
-  if (renderState.activeRequestHash !== hash || currentSignature() !== makeSignature(editorDraft)) {
-    renderState.activeRequestHash = '';
-    resetPreparedState();
-    syncEditorUi();
-    return;
-  }
+  if (!isCurrentRequest(request)) return;
 
   if (!result.ok) {
     renderState.activeRequestHash = '';
@@ -209,6 +226,7 @@ async function renderAndPrepareFromServer(hash) {
   log(`RENDER OK ${hash} jobId=${renderState.jobId} videoUrl=${renderState.serverUrl}`);
 
   const response = await fetch(result.videoUrl, { cache: 'no-store' });
+  if (!isCurrentRequest(request)) return;
   if (!response.ok) {
     renderState.activeRequestHash = '';
     renderState.status = 'error';
@@ -219,6 +237,7 @@ async function renderAndPrepareFromServer(hash) {
   }
 
   const blob = await response.blob();
+  if (!isCurrentRequest(request)) return;
   log(`BLOB RECEIVED ${hash} size=${blob.size} type=${blob.type}`);
 
   try {
@@ -234,10 +253,13 @@ async function renderAndPrepareFromServer(hash) {
     });
     log(`CACHE STORED ${hash}`);
   } catch (cacheError) {
+    if (!isCurrentRequest(request)) return;
     log(`CACHE STORE ERROR ${hash}: ${cacheError instanceof Error ? cacheError.message : String(cacheError)}`);
   }
+  if (!isCurrentRequest(request)) return;
 
   const cached = await videoCache.getVideo(hash);
+  if (!isCurrentRequest(request)) return;
   if (!cached || !(cached.blob instanceof Blob) || cached.blob.size <= 0) {
     renderState.activeRequestHash = '';
     renderState.status = 'error';
@@ -247,14 +269,14 @@ async function renderAndPrepareFromServer(hash) {
     return;
   }
 
-  await loadBlobIntoVideo(cached.blob, hash, 'server', { serverUrl: result.videoUrl, jobId: result.jobId });
+  await loadBlobIntoVideo(cached.blob, request, 'server', { serverUrl: result.videoUrl, jobId: result.jobId });
+  if (!isCurrentRequest(request)) return;
   renderState.activeRequestHash = '';
   syncEditorUi();
 }
 
-async function prepareFromCacheOrRender() {
-  const signature = currentSignature();
-  const hash = await computeContentHash(signature);
+async function prepareFromCacheOrRender(request) {
+  const { hash } = request;
   renderState.contentHash = hash;
   renderState.activeRequestHash = hash;
   renderState.status = 'checking';
@@ -267,26 +289,32 @@ async function prepareFromCacheOrRender() {
   try {
     cached = await videoCache.getVideo(hash);
   } catch (cacheError) {
+    if (!isCurrentRequest(request)) return;
     log(`CACHE GET ERROR ${hash}: ${cacheError instanceof Error ? cacheError.message : String(cacheError)}`);
     renderState.failurePhase = 'cache';
     renderState.errorMessage = cacheError instanceof Error ? cacheError.message : String(cacheError);
   }
 
+  if (!isCurrentRequest(request)) return;
   if (cached && cached.blob instanceof Blob && cached.blob.size > 0) {
     log(`CACHE HIT ${hash}`);
     try {
-      await loadBlobIntoVideo(cached.blob, hash, 'cache', { serverUrl: cached.serverUrl || '', jobId: cached.jobId || '' });
+      await loadBlobIntoVideo(cached.blob, request, 'cache', { serverUrl: cached.serverUrl || '', jobId: cached.jobId || '' });
+      if (!isCurrentRequest(request)) return;
       renderState.activeRequestHash = '';
       syncEditorUi();
       return;
     } catch (cachePrepareError) {
+      if (!isCurrentRequest(request)) return;
       log(`CACHE BROKEN ${hash}: ${cachePrepareError instanceof Error ? cachePrepareError.message : String(cachePrepareError)}`);
       try {
         await videoCache.deleteVideo(hash);
         log(`CACHE DELETED ${hash}`);
       } catch (deleteError) {
+        if (!isCurrentRequest(request)) return;
         log(`CACHE DELETE ERROR ${hash}: ${deleteError instanceof Error ? deleteError.message : String(deleteError)}`);
       }
+      if (!isCurrentRequest(request)) return;
       // fall through to render
     }
   } else {
@@ -300,10 +328,10 @@ async function prepareFromCacheOrRender() {
   renderState.status = 'rendering';
   renderState.prepareSource = 'server';
   syncEditorUi();
-  await renderAndPrepareFromServer(hash);
+  await renderAndPrepareFromServer(request);
 }
 
-async function startPreparedPip() {
+async function startPreparedPip(request) {
   if (!renderState.videoUrl) {
     renderState.status = 'idle';
     renderState.failurePhase = '';
@@ -318,6 +346,7 @@ async function startPreparedPip() {
   syncEditorUi();
 
   const result = await videoPip.startPip();
+  if (!isCurrentRequest(request)) return;
   if (result.ok) {
     renderState.status = 'ready';
     renderState.failurePhase = '';
@@ -334,6 +363,7 @@ async function startPreparedPip() {
 
 const render = () => {
   editorApi = null;
+  invalidateReadyState();
   appContainer.innerHTML = '';
 
   if (state.currentView === 'list') {
@@ -370,21 +400,16 @@ const render = () => {
       },
       onChange: (draft) => {
         editorDraft = normalizeDraft(draft);
-        if (renderState.status !== 'checking' && renderState.status !== 'rendering') {
-          revokeCurrentObjectUrl();
-          resetPreparedState();
-        }
-        syncEditorUi();
+        invalidateReadyState();
       },
       onPip: async (memo) => {
+        editorDraft = normalizeDraft(memo);
+        let request = snapshotRequest();
         try {
-          editorDraft = normalizeDraft(memo);
-
-          const signature = currentSignature();
-          const nextHash = await computeContentHash(signature);
+          const nextHash = request.hash;
 
           if (renderState.status === 'ready' && renderState.preparedHash === nextHash) {
-            await startPreparedPip();
+            await startPreparedPip(request);
             return;
           }
 
@@ -394,20 +419,16 @@ const render = () => {
           }
 
           if (renderState.status === 'error' && renderState.preparedHash === nextHash && renderState.prepareSource) {
-            await startPreparedPip();
+            await startPreparedPip(request);
             return;
           }
 
-          renderState.status = 'checking';
-          renderState.failurePhase = '';
-          renderState.errorMessage = '';
-          syncEditorUi();
-
-          revokeCurrentObjectUrl();
-          resetPreparedState();
+          invalidateReadyState();
+          request = snapshotRequest();
           renderState.contentHash = nextHash;
-          await prepareFromCacheOrRender();
+          await prepareFromCacheOrRender(request);
         } catch (error) {
+          if (!isCurrentRequest(request)) return;
           const message = error instanceof Error ? error.message : String(error);
           log(`PREPARE ERROR ${message}`);
           renderState.status = 'error';

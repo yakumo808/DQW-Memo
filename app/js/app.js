@@ -18,7 +18,8 @@ let editorApi = null;
 
 const renderState = {
   status: 'idle', // idle, checking, rendering, ready, error
-  prepareSource: '', // cache | server | ''
+  prepareSource: '', // cache | server | direct | ''
+  cacheWarning: '',
   contentHash: '',
   preparedHash: '',
   videoUrl: '',
@@ -67,6 +68,7 @@ function isCurrentRequest(request) {
 function resetPreparedState() {
   renderState.status = 'idle';
   renderState.prepareSource = '';
+  renderState.cacheWarning = '';
   renderState.contentHash = '';
   renderState.preparedHash = '';
   renderState.videoUrl = '';
@@ -119,7 +121,10 @@ function statusText() {
     if (renderState.prepareSource === 'cache') {
       return 'キャッシュから準備完了 — 「PiPで表示」でシステムPiP';
     }
-    return '新規生成して準備完了 — 「PiPで表示」でシステムPiP';
+    if (renderState.prepareSource === 'direct') {
+      return '新規生成成功／' + renderState.cacheWarning + '／Blob直接利用で準備完了 — 「PiPで表示」';
+    }
+    return '新規生成して準備完了（キャッシュ保存成功）— 「PiPで表示」でシステムPiP';
   }
   if (renderState.status === 'error') {
     if (renderState.failurePhase === 'cache') return 'キャッシュエラー: ' + (renderState.errorMessage || 'unknown');
@@ -240,6 +245,7 @@ async function renderAndPrepareFromServer(request) {
   if (!isCurrentRequest(request)) return;
   log(`BLOB RECEIVED ${hash} size=${blob.size} type=${blob.type}`);
 
+  let saved = false;
   try {
     await videoCache.putVideo(hash, {
       blob,
@@ -251,28 +257,53 @@ async function renderAndPrepareFromServer(request) {
       source: 'server',
       styleVersion: VIDEO_STYLE_VERSION,
     });
+    if (!isCurrentRequest(request)) return;
+    saved = true;
     log(`CACHE STORED ${hash}`);
   } catch (cacheError) {
     if (!isCurrentRequest(request)) return;
     log(`CACHE STORE ERROR ${hash}: ${cacheError instanceof Error ? cacheError.message : String(cacheError)}`);
+    renderState.cacheWarning = 'キャッシュ保存失敗';
   }
   if (!isCurrentRequest(request)) return;
 
-  const cached = await videoCache.getVideo(hash);
-  if (!isCurrentRequest(request)) return;
-  if (!cached || !(cached.blob instanceof Blob) || cached.blob.size <= 0) {
-    renderState.activeRequestHash = '';
-    renderState.status = 'error';
-    renderState.failurePhase = 'cache';
-    renderState.errorMessage = 'IndexedDB から Blob を再取得できませんでした';
-    syncEditorUi();
-    return;
+  let playbackBlob = blob;
+  let source = 'direct';
+  if (saved) {
+    try {
+      const cached = await videoCache.getVideo(hash);
+      if (!isCurrentRequest(request)) return;
+      if (!cached || !(cached.blob instanceof Blob) || cached.blob.size <= 0) {
+        throw new Error('IndexedDB から有効な Blob を再取得できませんでした');
+      }
+      playbackBlob = cached.blob;
+      source = 'server';
+    } catch (cacheError) {
+      if (!isCurrentRequest(request)) return;
+      log(`CACHE READBACK ERROR ${hash}: ${cacheError instanceof Error ? cacheError.message : String(cacheError)}`);
+      renderState.cacheWarning = 'キャッシュ再読込失敗（保存成功）';
+      await deleteBrokenCache(request);
+      if (!isCurrentRequest(request)) return;
+    }
   }
 
-  await loadBlobIntoVideo(cached.blob, request, 'server', { serverUrl: result.videoUrl, jobId: result.jobId });
+  if (source === 'direct') log(`CACHE BYPASS ${hash}: ${renderState.cacheWarning} — 取得済みBlobを直接利用`);
+  await loadBlobIntoVideo(playbackBlob, request, source, { serverUrl: result.videoUrl, jobId: result.jobId });
   if (!isCurrentRequest(request)) return;
   renderState.activeRequestHash = '';
   syncEditorUi();
+}
+
+async function deleteBrokenCache(request) {
+  if (!isCurrentRequest(request)) return;
+  try {
+    await videoCache.deleteVideo(request.hash);
+    if (!isCurrentRequest(request)) return;
+    log(`CACHE DELETED ${request.hash}`);
+  } catch (error) {
+    if (!isCurrentRequest(request)) return;
+    log(`CACHE DELETE ERROR ${request.hash}: ${error instanceof Error ? error.message : String(error)}`);
+  }
 }
 
 async function prepareFromCacheOrRender(request) {
@@ -288,11 +319,17 @@ async function prepareFromCacheOrRender(request) {
   let cached = null;
   try {
     cached = await videoCache.getVideo(hash);
+    if (cached && (!(cached.blob instanceof Blob) || cached.blob.size <= 0)) {
+      throw new Error('invalid cached blob');
+    }
   } catch (cacheError) {
     if (!isCurrentRequest(request)) return;
     log(`CACHE GET ERROR ${hash}: ${cacheError instanceof Error ? cacheError.message : String(cacheError)}`);
     renderState.failurePhase = 'cache';
     renderState.errorMessage = cacheError instanceof Error ? cacheError.message : String(cacheError);
+    cached = null;
+    log(`CACHE READ FAILED / REGENERATE ${hash}`);
+    await deleteBrokenCache(request);
   }
 
   if (!isCurrentRequest(request)) return;
@@ -307,13 +344,8 @@ async function prepareFromCacheOrRender(request) {
     } catch (cachePrepareError) {
       if (!isCurrentRequest(request)) return;
       log(`CACHE BROKEN ${hash}: ${cachePrepareError instanceof Error ? cachePrepareError.message : String(cachePrepareError)}`);
-      try {
-        await videoCache.deleteVideo(hash);
-        log(`CACHE DELETED ${hash}`);
-      } catch (deleteError) {
-        if (!isCurrentRequest(request)) return;
-        log(`CACHE DELETE ERROR ${hash}: ${deleteError instanceof Error ? deleteError.message : String(deleteError)}`);
-      }
+      log(`CACHE READ FAILED / REGENERATE ${hash}`);
+      await deleteBrokenCache(request);
       if (!isCurrentRequest(request)) return;
       // fall through to render
     }

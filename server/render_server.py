@@ -25,6 +25,7 @@ from contextlib import contextmanager
 import subprocess
 import sys
 import uuid
+import unicodedata
 from datetime import datetime
 from functools import partial
 from http import HTTPStatus
@@ -134,6 +135,57 @@ def write_text_file(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8", newline="\n")
 
 
+
+TEXT_MARGIN = 24
+TEXT_WIDTH = VIDEO_WIDTH - 2 * TEXT_MARGIN - 4
+BODY_FONT_SIZES = (28, 24, 22, 20)
+
+
+def wrap_text(text: str, columns: int) -> list[str]:
+    """Conservative one-em columns; preserve explicit line breaks."""
+    lines = []
+    for paragraph in text.replace("\r\n", "\n").replace("\r", "\n").expandtabs(2).split("\n"):
+        clusters = []
+        for char in paragraph:
+            if unicodedata.combining(char) and clusters:
+                clusters[-1] += char
+            elif not unicodedata.category(char).startswith("C"):
+                clusters.append(char)
+        if not clusters:
+            lines.append("")
+        start = 0
+        while start < len(clusters):
+            end = min(start + columns, len(clusters))
+            if end < len(clusters) and end - start > 1:
+                if clusters[end][0] in "、。，．！？!?）］】」』ー" or clusters[end - 1][0] in "（［【「『":
+                    end -= 1
+            lines.append("".join(clusters[start:end]))
+            start = end
+    return lines
+
+
+def limited_lines(lines: list[str], limit: int) -> list[str]:
+    if len(lines) <= limit:
+        return lines
+    result = lines[:limit]
+    result[-1] = result[-1][:-1] + "…"
+    return result
+
+
+def text_layout(title: str, content: str) -> list[tuple[str, int, int]]:
+    """Return (text, font size, top y) for bounded rows."""
+    title_lines = limited_lines(wrap_text(title, TEXT_WIDTH // 28), 2) if title else []
+    rows = [(line, 28, TEXT_MARGIN + i * 36) for i, line in enumerate(title_lines)]
+    body_y = TEXT_MARGIN + len(title_lines) * 36 + (12 if title_lines else 0)
+    for size in BODY_FONT_SIZES:
+        lines = wrap_text(content, TEXT_WIDTH // size)
+        capacity = max(1, (VIDEO_HEIGHT - TEXT_MARGIN - body_y) // (size + 6))
+        if len(lines) <= capacity:
+            break
+    rows.extend((line, size, body_y + i * (size + 6)) for i, line in enumerate(limited_lines(lines, capacity)))
+    return rows
+
+
 def render_job(title: str, content: str) -> dict[str, Any]:
     ensure_dirs()
     cleanup_jobs()
@@ -159,14 +211,20 @@ def _render_job(title: str, content: str, job_id: str) -> dict[str, Any]:
 
     # Use the same success-friendly delivery shape as D-1/D-2: 640x360, 30fps,
     # H.264 High, yuv420p, faststart, AAC LC silence track, ~4s.
-    drawtext = (
-        "drawtext="
-        f"fontfile='{escape_filter_path(DEFAULT_FONT)}':"
-        f"textfile='{escape_filter_path(input_txt)}':"
-        "fontsize=28:fontcolor=white:line_spacing=10:"
-        "x=(w-text_w)/2:y=(h-text_h)/2:"
-        "shadowcolor=black@0.75:shadowx=2:shadowy=2:fix_bounds=1"
-    )
+    filters = []
+    for index, (line, size, top) in enumerate(text_layout(title, content)):
+        if not line:
+            continue
+        line_path = job_dir / f"layout-{index:02d}.txt"
+        write_text_file(line_path, line)
+        filters.append(
+            "drawtext="
+            f"fontfile='{escape_filter_path(DEFAULT_FONT)}':"
+            f"textfile='{escape_filter_path(line_path)}':expansion=none:"
+            f"fontsize={size}:fontcolor=white:x={TEXT_MARGIN}:y={top}:"
+            "shadowcolor=black@0.75:shadowx=2:shadowy=2:fix_bounds=1"
+        )
+    drawtext = ",".join(filters) or "null"
 
     cmd = [
         FFMPEG,

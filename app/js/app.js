@@ -17,7 +17,7 @@ const videoCache = new VideoCache();
 let editorApi = null;
 
 const renderState = {
-  status: 'idle', // idle, checking, rendering, ready, error
+  status: 'idle', // idle, checking, rendering, waiting-pip, ready, error
   prepareSource: '', // cache | server | direct | ''
   cacheWarning: '',
   contentHash: '',
@@ -35,6 +35,47 @@ let editorDraft = { title: '', content: '' };
 let requestGeneration = 0;
 // One video element/controller: never share an in-flight prepare across requests.
 let prepareQueue = Promise.resolve();
+const retiredObjectUrls = new Set();
+const lifecycleWaiters = new Set();
+let pipStarting = false;
+
+function isPipActive() {
+  const v = videoPip.video;
+  return !!v && (document.pictureInPictureElement === v ||
+    v.webkitPresentationMode === 'picture-in-picture');
+}
+
+function cleanupRetiredUrls() {
+  const v = videoPip.video;
+  for (const url of retiredObjectUrls) {
+    const attached = v && (v.getAttribute('src') === url || v.currentSrc === url);
+    if (attached && (pipStarting || isPipActive())) continue;
+    if (v && v.getAttribute('src') === url) {
+      v.pause();
+      v.removeAttribute('src');
+      v.load();
+    }
+    URL.revokeObjectURL(url);
+    retiredObjectUrls.delete(url);
+    log(`Object URL cleanup: ${url}`);
+  }
+}
+
+function notifyVideoLifecycle() {
+  cleanupRetiredUrls();
+  for (const resolve of lifecycleWaiters) resolve();
+  lifecycleWaiters.clear();
+}
+
+for (const event of ['enterpictureinpicture', 'leavepictureinpicture', 'webkitpresentationmodechanged']) {
+  videoPip.video?.addEventListener(event, notifyVideoLifecycle);
+}
+
+function retireObjectUrl(url) {
+  if (!url) return;
+  retiredObjectUrls.add(url);
+  cleanupRetiredUrls();
+}
 
 const normalizeDraft = (draft) => ({
   title: (draft && draft.title) || '',
@@ -81,12 +122,9 @@ function resetPreparedState() {
 
 function revokeCurrentObjectUrl() {
   if (renderState.objectUrl) {
-    try {
-      URL.revokeObjectURL(renderState.objectUrl);
-    } catch (_) {
-      /* ignore */
-    }
+    const url = renderState.objectUrl;
     renderState.objectUrl = '';
+    retireObjectUrl(url);
   }
 }
 
@@ -94,6 +132,7 @@ function invalidateReadyState() {
   requestGeneration += 1;
   revokeCurrentObjectUrl();
   resetPreparedState();
+  notifyVideoLifecycle();
   syncEditorUi();
 }
 
@@ -115,6 +154,7 @@ function log(msg) {
 }
 
 function statusText() {
+  if (renderState.status === 'waiting-pip') return '現在のPiPを終了すると新しい動画を準備します';
   if (renderState.status === 'checking') return 'キャッシュ確認中…';
   if (renderState.status === 'rendering') return '動画生成中…';
   if (renderState.status === 'ready') {
@@ -137,6 +177,7 @@ function statusText() {
 }
 
 function pipLabel() {
+  if (renderState.status === 'waiting-pip') return 'PiP終了待ち';
   if (renderState.status === 'checking' || renderState.status === 'rendering') return '準備中…';
   if (renderState.status === 'ready') return 'PiPで表示';
   if (renderState.status === 'error') return '再試行';
@@ -157,6 +198,15 @@ function loadBlobIntoVideo(blob, request, prepareSource, meta) {
 
 async function prepareBlob(blob, request, prepareSource, meta) {
   if (!isCurrentRequest(request)) return;
+  // Preserve the visible PiP's src, not just its URL registration.
+  while (pipStarting || isPipActive()) {
+    renderState.status = 'waiting-pip';
+    syncEditorUi();
+    await new Promise(resolve => lifecycleWaiters.add(resolve));
+    if (!isCurrentRequest(request)) return;
+  }
+  renderState.status = 'rendering';
+  syncEditorUi();
   const { hash } = request;
   if (!(blob instanceof Blob) || blob.size <= 0) {
     throw new Error('invalid blob');
@@ -175,13 +225,7 @@ async function prepareBlob(blob, request, prepareSource, meta) {
     applied = true;
   } finally {
     if (!applied) {
-      // Only this request owns this URL. Newer prepare waits for this cleanup.
-      const v = videoPip.video;
-      if (v && v.getAttribute('src') === nextObjectUrl) {
-        v.removeAttribute('src');
-        v.load();
-      }
-      URL.revokeObjectURL(nextObjectUrl);
+      retireObjectUrl(nextObjectUrl);
     }
   }
 
@@ -377,7 +421,14 @@ async function startPreparedPip(request) {
   renderState.errorMessage = '';
   syncEditorUi();
 
-  const result = await videoPip.startPip();
+  pipStarting = true;
+  let result;
+  try {
+    result = await videoPip.startPip();
+  } finally {
+    pipStarting = false;
+    notifyVideoLifecycle();
+  }
   if (!isCurrentRequest(request)) return;
   if (result.ok) {
     renderState.status = 'ready';
@@ -445,7 +496,7 @@ const render = () => {
             return;
           }
 
-          if (renderState.status === 'rendering' || renderState.status === 'checking') {
+          if (renderState.status === 'rendering' || renderState.status === 'checking' || renderState.status === 'waiting-pip') {
             syncEditorUi();
             return;
           }

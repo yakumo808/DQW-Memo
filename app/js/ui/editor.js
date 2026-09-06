@@ -10,16 +10,20 @@ export function EditorUI(container, memo, callbacks) {
   let localMemoId = null;
 
   container.innerHTML = `
-    <div class="card">
+    <div class="card editor-card">
       <h1 class="app-title">メモ編集</h1>
+      <label for="memo-title">タイトル</label>
       <input type="text" id="memo-title" placeholder="タイトル" />
-      <textarea id="memo-content" rows="12" placeholder="メモの内容を入力してください"></textarea>
-      <div class="controls" style="display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap;">
-        <button id="btn-save" class="btn btn-success">保存</button>
-        <button id="btn-pip" class="btn btn-primary">動画を準備</button>
-        <button id="btn-back" class="btn btn-ghost">戻る</button>
+      <label for="memo-content">本文</label>
+      <textarea id="memo-content" rows="8" placeholder="メモの内容を入力してください"></textarea>
+      <div id="status" class="editor-status" role="status" aria-live="polite" aria-atomic="true"></div>
+      <div class="editor-actions">
+        <button id="btn-pip" class="btn btn-primary" aria-describedby="status">動画を準備</button>
+        <div class="controls editor-secondary">
+          <button id="btn-save" class="btn btn-success">保存</button>
+          <button id="btn-back" class="btn btn-ghost">一覧へ戻る</button>
+        </div>
       </div>
-      <div id="status" style="margin-top: 12px; font-size: 0.8rem; color: #9ca3af;"></div>
     </div>
   `;
 
@@ -84,8 +88,11 @@ export function EditorUI(container, memo, callbacks) {
   });
 
   return {
-    setStatus: function (text) {
-      if (statusEl) statusEl.textContent = text || '';
+    setStatus: function (text, state) {
+      if (statusEl) {
+        statusEl.textContent = text || '';
+        statusEl.dataset.state = state || 'idle';
+      }
     },
     setPipLabel: function (text) {
       if (btnPip) btnPip.textContent = text || '動画を準備';

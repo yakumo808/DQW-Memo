@@ -203,3 +203,26 @@ input, textarea {
     width: auto;
   }
 }
+
+/* Compact editor and opt-in diagnostics; no overlay on editing controls. */
+.editor-card .app-title { margin: 0 0 16px; font-size: 1.3rem; }
+.editor-card label { display: block; margin-bottom: 6px; font-size: .875rem; color: var(--text-muted); }
+.editor-card textarea { height: clamp(160px, 30vh, 280px); resize: vertical; line-height: 1.5; }
+.editor-actions { display: grid; gap: 10px; }
+.editor-actions > .btn { width: 100%; margin: 0; }
+.editor-secondary { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.editor-actions .btn { min-height: 48px; padding: 12px; }
+.editor-status { margin: 0 0 12px; padding: 10px 12px; border-left: 3px solid var(--border); background: var(--input-bg); border-radius: 6px; font-size: .875rem; line-height: 1.5; overflow-wrap: anywhere; }
+.editor-status[data-state="ready"] { border-color: var(--success); }
+.editor-status[data-state="error"] { border-color: var(--error); }
+.editor-status[data-state="checking"], .editor-status[data-state="rendering"], .editor-status[data-state="waiting-pip"] { border-color: var(--primary); }
+.debug-panel { margin-top: 12px; border: 1px solid var(--border); border-radius: 8px; color: var(--text-muted); }
+.debug-panel summary { cursor: pointer; padding: 14px 12px; min-height: 48px; font-size: .875rem; }
+.log-box { max-height: 30vh; overflow: auto; overflow-wrap: anywhere; padding: 10px; font-size: 12px; line-height: 1.5; background: #080808; color: #86efac; }
+.btn:focus-visible, summary:focus-visible { outline: 3px solid #93c5fd; outline-offset: 3px; }
+.memo-title { overflow-wrap: anywhere; }
+@media (max-width: 480px) {
+  body { padding: 12px; }
+  .card { padding: 14px; }
+  .app-container { padding-bottom: max(24px, env(safe-area-inset-bottom)); }
+}

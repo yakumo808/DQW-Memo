@@ -159,12 +159,12 @@ function statusText() {
   if (renderState.status === 'rendering') return '動画生成中…';
   if (renderState.status === 'ready') {
     if (renderState.prepareSource === 'cache') {
-      return 'キャッシュから準備完了 — 「PiPで表示」でシステムPiP';
+      return 'キャッシュから準備完了';
     }
     if (renderState.prepareSource === 'direct') {
-      return '新規生成成功／' + renderState.cacheWarning + '／Blob直接利用で準備完了 — 「PiPで表示」';
+      return '新規生成成功／' + renderState.cacheWarning + '／Blob直接利用で準備完了';
     }
-    return '新規生成して準備完了（キャッシュ保存成功）— 「PiPで表示」でシステムPiP';
+    return '新規生成して準備完了（キャッシュ保存成功）';
   }
   if (renderState.status === 'error') {
     if (renderState.failurePhase === 'cache') return 'キャッシュエラー: ' + (renderState.errorMessage || 'unknown');
@@ -186,7 +186,7 @@ function pipLabel() {
 
 function syncEditorUi() {
   if (!editorApi) return;
-  if (editorApi.setStatus) editorApi.setStatus(statusText());
+  if (editorApi.setStatus) editorApi.setStatus(statusText(), renderState.status);
   if (editorApi.setPipLabel) editorApi.setPipLabel(pipLabel());
 }
 

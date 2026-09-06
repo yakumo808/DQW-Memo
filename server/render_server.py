@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""DQWメモ Phase 3.2 D-3A: render server.
+r"""DQWメモ Phase 3.2 D-3A: render server.
 
 - POST /api/render
   JSON {title, content} -> UTF-8 input.txt -> ffmpeg -> generated.mp4
@@ -17,6 +17,11 @@ import argparse
 import json
 import mimetypes
 import os
+import re
+import shutil
+import threading
+import time
+from contextlib import contextmanager
 import subprocess
 import sys
 import uuid
@@ -42,6 +47,55 @@ VIDEO_HEIGHT = 360
 VIDEO_FPS = 30
 VIDEO_DURATION = 4
 VIDEO_MIME = "video/mp4"
+
+
+RENDER_JOB_TTL_SECONDS = 24 * 60 * 60
+JOB_ID_PATTERN = re.compile(r"\d{8}-\d{6}-[0-9a-f]{12}")
+JOB_LOCK = threading.RLock()
+ACTIVE_JOBS: set[str] = set()
+
+
+def cleanup_jobs() -> None:
+    """Best-effort cleanup; only this process's active jobs are protected."""
+    with JOB_LOCK:
+        try:
+            root = JOBS_DIR.resolve(strict=True)
+            candidates = list(root.iterdir())
+        except OSError as exc:
+            print(f"job cleanup enumeration failed: {exc}", file=sys.stderr)
+            return
+        cutoff = time.time() - RENDER_JOB_TTL_SECONDS
+        for candidate in candidates:
+            try:
+                if not JOB_ID_PATTERN.fullmatch(candidate.name) or candidate.name in ACTIVE_JOBS:
+                    continue
+                if candidate.is_symlink() or candidate.is_junction() or not candidate.is_dir():
+                    continue
+                # Verify the absolute target before recursive deletion.
+                if candidate.resolve(strict=True).parent != root:
+                    continue
+                if candidate.stat().st_mtime >= cutoff:
+                    continue
+                shutil.rmtree(candidate)
+                print(f"job cleanup removed: {candidate.name}", file=sys.stderr)
+            except OSError as exc:
+                print(f"job cleanup failed ({candidate.name}): {exc}", file=sys.stderr)
+
+
+@contextmanager
+def active_job(job_id: str):
+    with JOB_LOCK:
+        ACTIVE_JOBS.add(job_id)
+    try:
+        yield
+    finally:
+        with JOB_LOCK:
+            try:
+                # Start retention at completion, including failed render attempts.
+                os.utime(JOBS_DIR / job_id, None)
+            except OSError as exc:
+                print(f"job completion timestamp failed ({job_id}): {exc}", file=sys.stderr)
+            ACTIVE_JOBS.discard(job_id)
 
 
 def ensure_dirs() -> None:
@@ -82,7 +136,13 @@ def write_text_file(path: Path, text: str) -> None:
 
 def render_job(title: str, content: str) -> dict[str, Any]:
     ensure_dirs()
+    cleanup_jobs()
     job_id = safe_job_id()
+    with active_job(job_id):
+        return _render_job(title, content, job_id)
+
+
+def _render_job(title: str, content: str, job_id: str) -> dict[str, Any]:
     job_dir = JOBS_DIR / job_id
     job_dir.mkdir(parents=True, exist_ok=False)
 
@@ -263,15 +323,18 @@ class RenderHandler(SimpleHTTPRequestHandler):
         job_name = Path(path).name
         job_id = job_name[:-4]  # strip .mp4
         file_path = JOBS_DIR / job_id / "generated.mp4"
-        if not file_path.exists():
-            self.send_error(HTTPStatus.NOT_FOUND, "rendered mp4 not found")
-            return
-        data = file_path.read_bytes()
+        with JOB_LOCK:
+            try:
+                data = file_path.read_bytes()
+                modified = file_path.stat().st_mtime
+            except FileNotFoundError:
+                self.send_error(HTTPStatus.NOT_FOUND, "rendered mp4 not found")
+                return
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", VIDEO_MIME)
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "no-store")
-        self.send_header("Last-Modified", self.date_time_string(file_path.stat().st_mtime))
+        self.send_header("Last-Modified", self.date_time_string(modified))
         self.end_headers()
         self.wfile.write(data)
 
@@ -293,6 +356,7 @@ def main() -> int:
     args = parser.parse_args()
 
     ensure_dirs()
+    cleanup_jobs()
     handler = partial(RenderHandler, directory=args.root)
     server = ThreadingHTTPServer((args.host, args.port), handler)
     print(f"DQW render server listening on http://{args.host}:{args.port}/")

@@ -24,6 +24,18 @@ let browser;
   for (const width of [320,390,768,1280]) {
     await page.setViewport({width,height:844});
     await page.goto(`http://127.0.0.1:${server.address().port}`);
+    await page.evaluate(()=>{window.copied='';Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async text=>{window.copied=text;}}});});
+    const expected=await page.$eval('#log-box',e=>Array.from(e.childNodes).map(n=>n.textContent).join('\n'));
+    await page.click('#copy-log');
+    await page.waitForFunction(()=>document.querySelector('#copy-log-status').textContent==='コピーしました');
+    assert.equal(await page.evaluate(()=>window.copied),expected);
+    assert.equal(await page.$eval('.debug-panel',e=>e.open),false);
+    await page.evaluate(()=>{navigator.clipboard.writeText=async()=>{throw new Error('denied');};});
+    await page.click('#copy-log');await page.waitForFunction(()=>document.querySelector('#copy-log-status').textContent.includes('失敗'));
+    await page.evaluate(()=>{Object.defineProperty(navigator,'clipboard',{configurable:true,value:undefined});document.execCommand=()=>{window.copied=document.querySelector('textarea').value;return true;};});
+    await page.click('#copy-log');await page.waitForFunction(()=>document.querySelector('#copy-log-status').textContent==='コピーしました');
+    assert.equal(await page.evaluate(()=>window.copied),expected);
+    console.log('PASS clipboard full text/success/failure/collapsed/LAN fallback width',width);
     await page.click('#btn-new');
     await page.type('#memo-title','モバイル確認');
     await page.type('#memo-content','攻略メモ\n回復を優先');

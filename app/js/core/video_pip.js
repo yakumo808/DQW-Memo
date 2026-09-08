@@ -51,6 +51,9 @@ export class VideoPipController {
     return (
       label +
       ' readyState=' + v.readyState +
+      ' networkState=' + v.networkState +
+      ' error=' + (v.error ? v.error.code + ':' + v.error.message : 'none') +
+      ' assignedSrc=' + (v.getAttribute('src') || '') +
       ' videoWidth=' + v.videoWidth +
       ' videoHeight=' + v.videoHeight +
       ' paused=' + v.paused +
@@ -117,7 +120,7 @@ export class VideoPipController {
 
   async _doPrepare(url) {
     if (!this.video) {
-      return { ok: false, message: 'video 要素がありません' };
+      return { ok: false, reason: 'video-missing', message: 'video 要素がありません' };
     }
 
     this.video.setAttribute('playsinline', '');
@@ -134,60 +137,71 @@ export class VideoPipController {
       ' ' + this.snapshot('before')
     );
 
-    if (needAssign) {
-      this.video.src = url;
-      try {
-        this.video.load();
-      } catch (_) {
-        /* ignore */
+    const started = performance.now();
+    const eventNames = ['loadedmetadata', 'loadeddata', 'canplay', 'error', 'abort', 'stalled', 'loadstart', 'emptied', 'suspend'];
+    const onEvent = event => this.log(this.snapshot(
+      `prepare-event=${event.type} target=${url} elapsedMs=${Math.round(performance.now() - started)}`));
+    eventNames.forEach(name => this.video.addEventListener(name, onEvent));
+    try {
+      if (needAssign) {
+        this.video.src = url;
+        try {
+          this.video.load();
+        } catch (error) {
+          this.log(`prepare-load-error target=${url} error=${error}`);
+        }
+      } else if (!(this.video.readyState >= 1 && this.video.videoWidth > 0)) {
+        // URL は同じだが未 ready → load は1回だけ（先読み用）
+        try {
+          this.video.load();
+        } catch (error) {
+          this.log(`prepare-load-error target=${url} error=${error}`);
+        }
       }
-    } else if (!(this.video.readyState >= 1 && this.video.videoWidth > 0)) {
-      // URL は同じだが未 ready → load は1回だけ（先読み用）
-      try {
-        this.video.load();
-      } catch (_) {
-        /* ignore */
+
+      const result = await this._waitForMetadata(12000);
+      this.log(this.snapshot(`prepare-result target=${url} elapsedMs=${Math.round(performance.now() - started)}`));
+
+      if (!result.ok) {
+        return {
+          ok: false,
+          reason: result.reason,
+          message:
+            'メタデータ未確立 readyState=' + this.video.readyState +
+            ' videoWidth=' + this.video.videoWidth
+        };
       }
+      return { ok: true };
+    } finally {
+      eventNames.forEach(name => this.video.removeEventListener(name, onEvent));
     }
-
-    const ready = await this._waitForMetadata(12000);
-    this.log(this.snapshot('prepare-result'));
-
-    if (!ready) {
-      return {
-        ok: false,
-        message:
-          'メタデータ未確立 readyState=' + this.video.readyState +
-          ' videoWidth=' + this.video.videoWidth
-      };
-    }
-    return { ok: true };
   }
 
   _waitForMetadata(timeoutMs) {
     const v = this.video;
-    if (v.readyState >= 1 && v.videoWidth > 0) {
-      return Promise.resolve(true);
-    }
-    return new Promise((resolve) => {
+    const ready = () => v.readyState >= 1 && v.videoWidth > 0;
+    if (ready()) return Promise.resolve({ ok: true });
+    return new Promise(resolve => {
       let done = false;
-      const finish = (ok) => {
+      let lastInterruption = '';
+      let timer;
+      const events = ['loadedmetadata', 'loadeddata', 'canplay', 'error', 'abort', 'stalled'];
+      const finish = result => {
         if (done) return;
         done = true;
-        cleanup();
-        resolve(ok);
-      };
-      const onReady = () => {
-        if (v.readyState >= 1 && v.videoWidth > 0) finish(true);
-      };
-      const events = ['loadedmetadata', 'loadeddata', 'canplay'];
-      const cleanup = () => {
-        events.forEach((e) => v.removeEventListener(e, onReady));
+        events.forEach(e => v.removeEventListener(e, onEvent));
         clearTimeout(timer);
+        resolve(result);
       };
-      events.forEach((e) => v.addEventListener(e, onReady));
-      const timer = setTimeout(() => finish(false), timeoutMs);
-      onReady();
+      const onEvent = event => {
+        if (v.error) { finish({ ok: false, reason: 'metadata-error' }); return; }
+        if (ready()) { finish({ ok: true }); return; }
+        // load() itself can emit abort for the old resource. Do not fail early.
+        if (event && ['abort', 'stalled'].includes(event.type)) lastInterruption = event.type;
+      };
+      events.forEach(e => v.addEventListener(e, onEvent));
+      timer = setTimeout(() => finish({ ok: false, reason: 'metadata-' + (lastInterruption || 'timeout') }), timeoutMs);
+      onEvent();
     });
   }
 

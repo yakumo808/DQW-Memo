@@ -226,3 +226,18 @@ input, textarea {
   .card { padding: 14px; }
   .app-container { padding-bottom: max(24px, env(safe-area-inset-bottom)); }
 }
+
+/* Swipe reveals a separate, explicit delete action; vertical panning stays native. */
+.memo-item { position: relative; overflow: hidden; padding: 0; }
+.memo-front { position: relative; background: var(--card-bg); padding: 16px 12px; min-height: 72px; touch-action: pan-y pinch-zoom; user-select: none; transition: transform .16s ease; cursor: pointer; }
+.memo-item.delete-open .memo-front { transform: translateX(-88px); }
+.memo-delete { position: absolute; right: 0; top: 0; bottom: 0; width: 88px; border: 0; background: #b91c1c; color: white; font-size: 1rem; font-weight: bold; cursor: pointer; visibility: hidden; }
+.memo-item.delete-open .memo-delete { visibility: visible; }
+.memo-front:focus-visible, .memo-delete:focus-visible { outline: 3px solid #93c5fd; outline-offset: -3px; }
+@media (prefers-reduced-motion: reduce) { .memo-front { transition: none; } }
+
+.memo-heading { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 8px; }
+.dev-version { font-size: .75rem; font-weight: normal; color: var(--text-muted); white-space: nowrap; }
+
+.debug-copy { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin:12px 0 0; font-size:14px; }
+.debug-copy button { min-height:48px; padding:8px 16px; font-size:14px; }

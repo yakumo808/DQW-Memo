@@ -184,7 +184,7 @@ const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 
   const records = await page.evaluate(async () => {
     const db = await new Promise((resolve, reject) => {
-      const r = indexedDB.open('DQW-Memo', 1); r.onsuccess = () => resolve(r.result); r.onerror = () => reject(r.error);
+      const r = indexedDB.open('DQW-Memo'); r.onsuccess = () => resolve(r.result); r.onerror = () => reject(r.error);
     });
     const values = await new Promise((resolve, reject) => {
       const r = db.transaction('videoCache').objectStore('videoCache').getAll();
@@ -192,7 +192,7 @@ const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
     });
     db.close();
     return Promise.all(values.map(async r => ({ key: r.key, sha: Array.from(new Uint8Array(
-      await crypto.subtle.digest('SHA-256', await r.blob.arrayBuffer())
+      await crypto.subtle.digest('SHA-256', (r.bytes || await r.blob.arrayBuffer()))
     )).map(x => x.toString(16).padStart(2, '0')).join('') })));
   });
   const renders = await page.evaluate(() => probe.renders);

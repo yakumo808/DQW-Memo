@@ -2,7 +2,8 @@
 
 const DB_NAME = 'DQW-Memo';
 const STORE_NAME = 'videoCache';
-const DB_VERSION = 1;
+const ACCESS_STORE = 'videoCacheAccess';
+const DB_VERSION = 2;
 export const MAX_CACHE_ENTRIES = 20;
 export const MAX_CACHE_BYTES = 1024 * 1024;
 
@@ -13,8 +14,8 @@ function cacheError(phase, error) {
 }
 
 function normalizeRecord(record) {
-  if (!(record.blob instanceof Blob)) throw new Error('record has no Blob');
-  const size = record.blob.size; // Never trust old or incorrect size metadata.
+  if (!(record.bytes instanceof ArrayBuffer) && !(record.blob instanceof Blob)) throw new Error('record has no bytes or Blob');
+  const size = record.bytes instanceof ArrayBuffer ? record.bytes.byteLength : record.blob.size; // Never trust old or incorrect size metadata.
   if (!Number.isSafeInteger(size) || size < 0) throw new Error('invalid Blob size');
   const date = value => Number.isFinite(Date.parse(value)) ? new Date(value).toISOString() : null;
   const createdAt = date(record.createdAt) || new Date(0).toISOString();
@@ -32,11 +33,11 @@ function transaction(db, mode, work) {
       else reject(ctx.error);
     };
     try {
-      tx = db.transaction(STORE_NAME, mode);
+      tx = db.transaction([STORE_NAME, ACCESS_STORE], mode);
       tx.oncomplete = () => resolve(ctx.result);
       tx.onabort = () => reject(ctx.error || cacheError(ctx.phase, tx.error));
       tx.onerror = event => { ctx.error ||= cacheError(ctx.phase, event.target.error || tx.error); };
-      work(tx.objectStore(STORE_NAME), ctx, fail);
+      work(tx.objectStore(STORE_NAME), ctx, fail, tx.objectStore(ACCESS_STORE));
     } catch (error) { fail(error); }
   });
 }
@@ -57,12 +58,13 @@ function openDatabase() {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
     request.onupgradeneeded = () => {
       const db = request.result;
+      if (!db.objectStoreNames.contains(ACCESS_STORE)) db.createObjectStore(ACCESS_STORE, { keyPath: 'key' });
       if (!db.objectStoreNames.contains(STORE_NAME)) {
         db.createObjectStore(STORE_NAME, { keyPath: 'key' });
       }
     };
     request.onerror = () => reject(request.error || new Error('IndexedDB open failed'));
-    request.onsuccess = () => resolve(request.result);
+    request.onsuccess = () => { request.result.onversionchange = () => request.result.close(); resolve(request.result); };
   });
 }
 
@@ -75,13 +77,14 @@ function txDone(tx) {
 }
 
 export class VideoCache {
-  constructor({ maxEntries = MAX_CACHE_ENTRIES, maxBytes = MAX_CACHE_BYTES } = {}) {
+  constructor({ maxEntries = MAX_CACHE_ENTRIES, maxBytes = MAX_CACHE_BYTES, touchOnRead = true } = {}) {
     if (!Number.isSafeInteger(maxEntries) || maxEntries < 1 || !Number.isSafeInteger(maxBytes) || maxBytes < 1) {
       throw new Error('cache limits must be positive safe integers');
     }
     this._dbPromise = null;
     this.maxEntries = maxEntries;
     this.maxBytes = maxBytes;
+    this.touchOnRead = touchOnRead;
   }
 
   async _db() {
@@ -96,7 +99,8 @@ export class VideoCache {
     let payload;
     try { payload = normalizeRecord({
       key,
-      blob: record.blob,
+      bytes: record.bytes instanceof ArrayBuffer ? record.bytes : await record.blob.arrayBuffer(),
+      type: record.type || record.blob?.type || 'video/mp4',
       mimeType: record.mimeType || record.blob?.type || 'video/mp4',
       createdAt: record.createdAt || new Date().toISOString(),
       width: Number(record.width || 0),
@@ -107,14 +111,16 @@ export class VideoCache {
       lastAccessedAt: new Date().toISOString(),
     }); } catch (error) { throw cacheError('SIZE', error); }
     if (payload.size > this.maxBytes) throw cacheError('SIZE_LIMIT', 'Blob exceeds cache byte limit');
-    await transaction(db, 'readwrite', (store, ctx, fail) => {
+    await transaction(db, 'readwrite', (store, ctx, fail, access) => {
       ctx.phase = 'LRU_ENUMERATE';
       const request = store.getAll();
-      request.onsuccess = () => {
+      const metadata = access.getAll();
+      metadata.onsuccess = () => {
         try {
           ctx.phase = 'SIZE';
           // Replacing a key does not count twice. Protect the incoming record.
-          const records = request.result.filter(item => item.key !== key).map(normalizeRecord);
+          const times = new Map(metadata.result.map(item => [item.key, item.lastAccessedAt]));
+          const records = request.result.filter(item => item.key !== key).map(normalizeRecord).map(item => ({...item, lastAccessedAt: Number.isFinite(Date.parse(times.get(item.key))) ? times.get(item.key) : item.lastAccessedAt}));
           let bytes = payload.size;
           for (const item of records) {
             bytes += item.size;
@@ -127,11 +133,13 @@ export class VideoCache {
           for (const item of records) {
             if (count <= this.maxEntries && bytes <= this.maxBytes) break;
             ctx.phase = 'DELETE';
+            access.delete(item.key);
             const deletion = store.delete(item.key);
             deletion.onerror = () => { ctx.error ||= cacheError('DELETE', deletion.error); };
             count--; bytes -= item.size;
           }
           ctx.phase = 'PUT';
+          access.delete(key); // New save supplies its own timestamp; discard prior touch.
           const put = store.put(payload);
           put.onerror = () => { ctx.error ||= cacheError('PUT', put.error); };
         } catch (error) { fail(error); }
@@ -152,23 +160,33 @@ export class VideoCache {
     await txDone(tx);
     if (!value) return null;
     let normalized;
-    try { normalized = normalizeRecord(value); }
+    try {
+      normalized = normalizeRecord(value);
+      if (value.bytes instanceof ArrayBuffer) normalized.blob = new Blob([value.bytes], { type: value.type || 'video/mp4' });
+    }
     catch (error) {
       console.warn(cacheError('SIZE', error));
       return value; // Blob acquisition must not depend on optional metadata.
     }
+    // Reversible diagnostic switch: keep the acquired Blob free of read-side writes.
+    if (!this.touchOnRead) return normalized;
     try {
-      await transaction(db, 'readwrite', (store, ctx, fail) => {
+      await transaction(db, 'readwrite', (store, ctx, fail, access) => {
         ctx.phase = 'METADATA';
         const request = store.get(key);
         request.onsuccess = () => {
           try {
             // Re-read atomically: never resurrect an entry deleted since the HIT.
             if (!request.result) return;
-            const current = normalizeRecord(request.result);
-            current.lastAccessedAt = new Date(Math.max(Date.now(), Date.parse(current.lastAccessedAt))).toISOString();
-            store.put(current);
-            ctx.result = current.lastAccessedAt;
+            const prior = access.get(key);
+            prior.onsuccess = () => {
+              try {
+                const oldTime = Date.parse(prior.result?.lastAccessedAt || request.result.lastAccessedAt);
+                const lastAccessedAt = new Date(Math.max(Date.now(), Number.isFinite(oldTime) ? oldTime : 0)).toISOString();
+                access.put({key, lastAccessedAt});
+                ctx.result = lastAccessedAt;
+              } catch (error) { fail(error); }
+            };
           } catch (error) { fail(error); }
         };
       }).then(accessed => { if (accessed) normalized.lastAccessedAt = accessed; });
@@ -195,17 +213,19 @@ export class VideoCache {
 
   async deleteVideo(key) {
     const db = await this._db();
-    const tx = db.transaction(STORE_NAME, 'readwrite');
+    const tx = db.transaction([STORE_NAME, ACCESS_STORE], 'readwrite');
     const store = tx.objectStore(STORE_NAME);
     store.delete(key);
+    tx.objectStore(ACCESS_STORE).delete(key);
     await txDone(tx);
   }
 
   async clearCache() {
     const db = await this._db();
-    const tx = db.transaction(STORE_NAME, 'readwrite');
+    const tx = db.transaction([STORE_NAME, ACCESS_STORE], 'readwrite');
     const store = tx.objectStore(STORE_NAME);
     store.clear();
+    tx.objectStore(ACCESS_STORE).clear();
     await txDone(tx);
   }
 }

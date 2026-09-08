@@ -28,6 +28,12 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
     const { VideoCache, MAX_CACHE_ENTRIES, MAX_CACHE_BYTES } = await import('/app/js/core/video_cache.js');
     const results = [];
     const ok = (value, label) => { if (!value) throw new Error(label); results.push(label); };
+    await new Promise((resolve,reject)=>{
+      const r=indexedDB.open('DQW-Memo',1);
+      r.onupgradeneeded=()=>r.result.createObjectStore('videoCache',{keyPath:'key'});
+      r.onerror=()=>reject(r.error);
+      r.onsuccess=()=>{const db=r.result;const tx=db.transaction('videoCache','readwrite');tx.objectStore('videoCache').put({key:'v1',blob:new Blob(['legacy'])});tx.oncomplete=()=>{db.close();resolve();};};
+    });
     const cache = new VideoCache({ maxEntries: 3, maxBytes: 12 });
     const blob = n => new Blob([new Uint8Array(n)], { type: 'video/mp4' });
     const put = (key, n = 3) => cache.putVideo(key, { blob: blob(n) });
@@ -36,16 +42,36 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
       const r = db.transaction('videoCache').objectStore('videoCache').getAll(); r.onsuccess = () => resolve(r.result); r.onerror = () => reject(r.error);
     });
     const write = records => new Promise((resolve, reject) => {
-      const tx = db.transaction('videoCache', 'readwrite');
-      for (const r of records) tx.objectStore('videoCache').put(r);
+      const tx = db.transaction(['videoCache','videoCacheAccess'], 'readwrite');
+      for (const r of records) { tx.objectStore('videoCache').put(r); tx.objectStore('videoCacheAccess').delete(r.key); }
       tx.oncomplete = resolve; tx.onabort = () => reject(tx.error);
     });
+    ok(db.version===2 && (await cache.getVideo('v1')).blob.size===6, 'v1 upgrade retains legacy Blob');
     const reset = () => cache.clearCache();
     ok(MAX_CACHE_ENTRIES === 20 && MAX_CACHE_BYTES === 1048576, 'defaults 20 / 1MiB');
     await reset(); ok(JSON.stringify(await cache.getStats()) === '{"entries":0,"bytes":0}', 'empty');
     await put('a'); ok((await cache.getStats()).bytes === 3, 'one record / Blob bytes');
     let rows = await raw(); rows[0].lastAccessedAt = '2000-01-01T00:00:00.000Z'; await write(rows);
-    await cache.getVideo('a'); ok((await raw())[0].lastAccessedAt > rows[0].lastAccessedAt, 'HIT persists access timestamp');
+    const noTouch = new VideoCache({ maxEntries: 3, maxBytes: 12, touchOnRead: false });
+    const savedPut = IDBObjectStore.prototype.put;
+    let readPuts = 0;
+    IDBObjectStore.prototype.put = function(...args) { readPuts++; return savedPut.apply(this,args); };
+    try {
+      const hit = await noTouch.getVideo('a');
+      ok(hit.blob.size === 3 && (await hit.blob.arrayBuffer()).byteLength === 3, 'no-touch HIT Blob readable');
+      ok(readPuts === 0 && (await raw())[0].lastAccessedAt === rows[0].lastAccessedAt, 'no-touch HIT zero puts and unchanged timestamp');
+    } finally { IDBObjectStore.prototype.put = savedPut; }
+    const beforeTouch=(await raw())[0];
+    const beforeBytes=new Uint8Array(beforeTouch.bytes);
+    readPuts=0;
+    IDBObjectStore.prototype.put=function(...args){readPuts++;return savedPut.apply(this,args);};
+    try { await cache.getVideo('a'); } finally { IDBObjectStore.prototype.put=savedPut; }
+    const afterTouch=(await raw())[0];
+    const touched=await new Promise((resolve,reject)=>{const r=db.transaction('videoCacheAccess').objectStore('videoCacheAccess').get('a');r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});
+    const afterBytes=new Uint8Array(afterTouch.bytes);
+    ok(readPuts===1 && touched.lastAccessedAt>beforeTouch.lastAccessedAt && afterTouch.lastAccessedAt===beforeTouch.lastAccessedAt, 'HIT updates timestamp with one record put');
+    ok(beforeBytes.length===afterBytes.length && beforeBytes.every((v,i)=>v===afterBytes[i]) && beforeTouch.type===afterTouch.type && !afterTouch.blob, 'touch preserves all Blob bytes and type');
+    ok(Object.keys(beforeTouch).every(k=>k==='blob'||k==='lastAccessedAt'||JSON.stringify(beforeTouch[k])===JSON.stringify(afterTouch[k])), 'touch preserves key size and other metadata');
     await put('b'); ok((await raw()).length === 2, 'below entry limit no eviction');
     await put('c'); rows = await raw();
     for (let i = 0; i < rows.length; i++) rows[i].lastAccessedAt = `200${i}-01-01T00:00:00.000Z`;
@@ -83,6 +109,11 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
     IDBObjectStore.prototype.getAll = originalAll;
     await reset(); await write([{ key: 'broken', blob: null }]);
     try { await put('d'); } catch (e) { ok(e.message.includes('SIZE'), 'size failure classified'); }
+    await reset();
+    for (const key of ['a','b','c','d']) await noTouch.putVideo(key,{blob:blob(3)});
+    ok((await noTouch.getStats()).entries === 3, 'no-touch save-time entry cleanup');
+    await noTouch.putVideo('e',{blob:blob(10)});
+    ok((await noTouch.getStats()).bytes === 10 && (await noTouch.getStats()).entries === 1, 'no-touch save-time byte cleanup');
     await reset();
     window.lru = { cache: new VideoCache(), blob, originalDelete: IDBObjectStore.prototype.delete, originalPut, renders: 0 };
     const originalFetch = fetch.bind(window);

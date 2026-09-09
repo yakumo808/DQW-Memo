@@ -17,7 +17,7 @@ function safeJsonParse(text) {
 
 /**
  * POST /api/render -> { ok, jobId, videoUrl, width, height, duration, mimeType }
- * @param {{ title: string, content: string, endpoint?: string, timeoutMs?: number }} params
+ * @param {{ title: string, content: string, pageSeconds?: number, endpoint?: string, timeoutMs?: number }} params
  * @returns {Promise<{ok:boolean, jobId?:string, videoUrl?:string, width?:number, height?:number, duration?:number, mimeType?:string, errorCode?:string, message?:string}>}
  */
 export async function renderMemoVideo(params) {
@@ -34,7 +34,8 @@ export async function renderMemoVideo(params) {
       },
       body: JSON.stringify({
         title: params.title,
-        content: params.content
+        content: params.content,
+        pageSeconds: params.pageSeconds ?? 3
       }),
       signal: controller ? controller.signal : undefined,
       credentials: 'same-origin'

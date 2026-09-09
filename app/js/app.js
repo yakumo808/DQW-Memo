@@ -1,3 +1,4 @@
+import { copyText } from './ui/clipboard.js';
 import { state } from './core/app_state.js';
 import { ListUI, DEV_VERSION } from './ui/list.js';
 import { EditorUI } from './ui/editor.js';
@@ -7,7 +8,7 @@ import { renderMemoVideo } from './core/video_render_client.js';
 import { VideoCache } from './core/video_cache.js';
 // 案A floating / captureStream は保持・既定OFF
 
-const VIDEO_STYLE_VERSION = 'v1';
+const VIDEO_STYLE_VERSION = 'pages-v2';
 
 const appContainer = document.getElementById('app');
 const videoPip = new VideoPipController('pip-video');
@@ -81,12 +82,13 @@ function retireObjectUrl(url) {
 
 const normalizeDraft = (draft) => ({
   title: (draft && draft.title) || '',
-  content: (draft && draft.content) || ''
+  content: (draft && draft.content) || '',
+  pageSeconds: [2,3,4,5].includes(draft?.pageSeconds) ? draft.pageSeconds : 3
 });
 
 const makeSignature = (draft) => {
   const next = normalizeDraft(draft);
-  return next.title + '\n' + next.content + '\n' + VIDEO_STYLE_VERSION;
+  return JSON.stringify([VIDEO_STYLE_VERSION, next.title, next.content, next.pageSeconds]);
 };
 
 const currentSignature = () => makeSignature(editorDraft);
@@ -96,6 +98,7 @@ function snapshotRequest() {
     memoId: state.selectedMemo?.id ?? null,
     title: editorDraft.title,
     content: editorDraft.content,
+    pageSeconds: editorDraft.pageSeconds,
     hash: currentSignature(),
     generation: requestGeneration,
   });
@@ -105,7 +108,7 @@ function isCurrentRequest(request) {
   return request.generation === requestGeneration &&
     state.currentView === 'editor' &&
     request.memoId === (state.selectedMemo?.id ?? null) &&
-    request.title === editorDraft.title && request.content === editorDraft.content;
+    request.title === editorDraft.title && request.content === editorDraft.content && request.pageSeconds === editorDraft.pageSeconds;
 }
 
 function resetPreparedState() {
@@ -337,7 +340,7 @@ async function renderAndPrepareFromServer(request) {
   renderState.activeRequestHash = hash;
   syncEditorUi();
 
-  const result = await renderMemoVideo({ title, content });
+  const result = await renderMemoVideo({ title, content, pageSeconds: request.pageSeconds });
   if (!isCurrentRequest(request)) return;
 
   if (!result.ok) {
@@ -452,6 +455,9 @@ async function deleteBrokenCache(request) {
 
 async function prepareFromCacheOrRender(request) {
   const { hash } = request;
+  if (request.content.replace(/\r\n?/g, '\n').split('\n').filter(line => line === '--- page ---').length >= 6) {
+    throw new Error('ページ数が多すぎます。手動ページは6ページまでです。');
+  }
   renderState.contentHash = hash;
   renderState.activeRequestHash = hash;
   renderState.status = 'checking';
@@ -697,19 +703,7 @@ copyLogButton?.addEventListener('click', async () => {
   copyLogButton.disabled = true;
   clearTimeout(copyFeedbackTimer);
   try {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(text);
-    } else {
-      // LAN HTTP commonly lacks Clipboard API. Keep this synchronous with the tap.
-      const area = document.createElement('textarea');
-      area.value = text; area.style.cssText = 'position:fixed;left:0;top:0;opacity:0;font-size:16px';
-      const focused = document.activeElement;
-      document.body.appendChild(area);
-      try {
-        area.focus(); area.select(); area.setSelectionRange(0, area.value.length);
-        if (!document.execCommand('copy')) throw new Error('clipboard unavailable');
-      } finally { area.remove(); focused?.focus({preventScroll:true}); }
-    }
+    await copyText(text);
     feedback.textContent = 'コピーしました';
   } catch (error) {
     feedback.textContent = 'コピーに失敗しました';

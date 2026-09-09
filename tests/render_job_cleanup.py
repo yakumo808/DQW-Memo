@@ -129,7 +129,7 @@ class CleanupTests(unittest.TestCase):
             with patch.object(s.shutil, 'rmtree', side_effect=PermissionError('injected busy')), patch.object(s.subprocess, 'run', side_effect=run):
                 req = Request(base + '/api/render', data=json.dumps({'title':'テスト', 'content':'一行目\n二行目'}).encode(), headers={'Content-Type':'application/json'})
                 with urlopen(req) as response: result = json.load(response)
-            self.assertEqual(set(result), {'ok','jobId','jobDir','inputTxt','outputMp4','videoUrl','width','height','duration','mimeType'})
+            self.assertEqual(set(result), {'ok','jobId','jobDir','inputTxt','outputMp4','videoUrl','width','height','duration','mimeType','pageCount','pageSeconds'})
             self.assertTrue(result['ok']); self.assertTrue(old.exists())
             with urlopen(base + result['videoUrl']) as response:
                 data = response.read(); self.assertIn(b'ftyp', data[:32]); self.assertEqual(response.headers['Content-Type'], 'video/mp4')
@@ -137,7 +137,7 @@ class CleanupTests(unittest.TestCase):
             cmd = commands[0]
             for flag, value in [('-c:v','libx264'),('-profile:v','high'),('-pix_fmt','yuv420p'),('-c:a','aac'),('-movflags','+faststart')]:
                 self.assertEqual(cmd[cmd.index(flag)+1], value)
-            self.assertIn('color=c=0x1f2937:s=640x360:r=30:d=4', cmd)
+            self.assertIn('color=c=0x1f2937:s=640x360:r=30:d=3', cmd)
             self.assertIn('anullsrc=r=48000:cl=stereo', cmd)
             # Next render request performs cleanup, without changing API shape.
             with urlopen(req) as response: self.assertTrue(json.load(response)['ok'])

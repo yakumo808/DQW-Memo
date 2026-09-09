@@ -31,7 +31,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   const errors = [];
   page.on('pageerror', e => errors.push(e.message));
   await page.goto(origin);
-  assert.match(await page.$eval('#log-box',e=>e.textContent), /ENV browser=Chrome.*ENV app=v0.8.3.2-dev.*ENV userAgent=/s);
+  assert.match(await page.$eval('#log-box',e=>e.textContent), /ENV browser=Chrome.*ENV app=v0.9.0-dev.*ENV userAgent=/s);
   const envPage=await browser.newPage();
   for (const [browserName,ua] of [
     ['Safari','Mozilla/5.0 (iPhone; CPU iPhone OS 26_6_1 like Mac OS X) AppleWebKit/605.1.15 Version/26.6 Mobile/15E148 Safari/604.1'],
@@ -42,7 +42,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
     await envPage.waitForSelector('.dev-version');
     const logs=await envPage.$eval('#log-box',e=>e.textContent);
     assert.ok(logs.includes('ENV browser='+browserName));
-    assert.ok(logs.includes('ENV app=v0.8.3.2-dev'));
+    assert.ok(logs.includes('ENV app=v0.9.0-dev'));
     assert.ok(logs.includes('ENV userAgent='+ua));
     if(browserName!=='その他') assert.ok(logs.includes('iOS=26_6_1'));
   }

@@ -2,7 +2,7 @@
 import { MemoRepository } from '../api.js';
 
 // Update manually at development milestones to identify the loaded UI build.
-export const DEV_VERSION = 'v0.8.3.2-dev';
+export const DEV_VERSION = 'v0.9.0-dev';
 
 /**
  * メモ一覧を表示するコンポーネント

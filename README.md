@@ -107,7 +107,7 @@ IndexedDBはDB名 `DQW-Memo`、version `2`。両storeのkeyPathは `key` です�
 - `videoCacheAccess`：`key` と `lastAccessedAt`。HIT時はこのmetadataだけ更新し、bytes/Blob本体を再putしません。
 - LRU上限は20件・1MiB。bytes.byteLength（旧形式はblob.size）で容量計算し、保存時に古いアクセスから削除します。専用metadataがなければ旧recordの時刻へfallback。削除・保存は両storeを同じtransactionで扱います。
 
-キーは `title + '\n' + content + '\n' + 'v1'` で、暗号学的ハッシュではありません。オリジンやブラウザーが変わると保存領域も変わります。IndexedDBからの削除と再生中Object URLの寿命は別管理です。
+キーは `JSON.stringify(['pages-v2', title, content, pageSeconds])` です。本文中の全ページ・順序・表示秒数を含み、暗号学的ハッシュではありません。旧キーは新レイアウトでは再利用せずLRUに任せます。オリジンやブラウザーが変わると保存領域も変わります。IndexedDBからの削除と再生中Object URLの寿命は別管理です。
 
 生成動画の設定：
 
@@ -119,8 +119,8 @@ IndexedDBはDB名 `DQW-Memo`、version `2`。両storeのkeyPathは `key` です�
 | ピクセル形式 | yuv420p |
 | 音声 | AAC無音、48kHzステレオ、96kbps |
 | MP4配置 | faststart |
-| 長さ | 4秒の設定。video側はloop再生 |
-| 文字 | NotoSansJP-VF.ttf、白・影付き。日本語自動折返し、本文28→24→22→20px、収まらない部分は省略。1画面構成 |
+| 長さ | 自動分割後ページ数 × 選択秒数（2/3/4/5秒、初期3秒）。video側はloop再生 |
+| 文字 | NotoSansJP-VF.ttf、白・影付き。日本語自動折返し、本文28→24→22→20px、本文の収まらない行は追加ページへ分割。タイトルは従来どおり最大2行 |
 
 ## Spikeとローカル資産
 
@@ -135,7 +135,7 @@ IndexedDBはDB名 `DQW-Memo`、version `2`。両storeのkeyPathは `key` です�
 - DB upgradeが旧タブでブロックされた場合の待機対応と、DB接続失敗Promiseの保持が残っています。
 - 旧Blob互換用の診断・再試行を維持しています。bytesの長時間放置・ブラウザ終了・端末再起動後の耐久性は継続観測事項です。
 - キャッシュキーと開発ログには本文が含まれます。開発ログは折りたたみ・全文コピーに対応しています。
-- 長文は1画面内で折返し・縮小・省略し、複数ページ化は未対応です。
+- 自動分割で動画が長くなると生成時間・サイズも増えます。LRU上限を超える動画は直接再生へfallbackします。
 - 認証・外部公開向けの対応はありません。ローカルLAN用途です。
 
 メモの個別削除は左スワイプでボタンを表示し、明示タップで削除します。動画キャッシュは連動削除せずLRUに任せます。過去の引き継ぎ時点の課題と解決経緯はdocs/devlogを参照してください。
@@ -153,3 +153,9 @@ IndexedDBはDB名 `DQW-Memo`、version `2`。両storeのkeyPathは `key` です�
 少なくとも新規生成とCACHE HITの両経路、HIT時のrender API未実行、Blob URL再生、WebKit PiP、DQWへの切替を確認し、端末・OS・ブラウザー・コミット・操作・結果を記録します。
 
 各Phaseまたは大きな変更の完了時には `docs/devlog/` にMarkdownを残します。最低限、目的、変更ファイル、実装内容、検証結果、実機確認、失敗・迷走、Git状態、次の課題を記録します。引き継いだ成功報告と自分で実行した検証を区別し、未検証事項は明記してください。
+
+## 複数ページメモ（v0.9.0-dev）
+本文textareaは1つのまま、完全一致する単独行 `--- page ---` で手動改ページします。「改ページをコピー」はLAN HTTPにもfallback対応。前後に空行があれば本文の空行として保持し、空の手動ページも数えます。手動7ページ以上は生成前にエラーになります。
+各手動ページは描画行数と余白・タイトル領域・文字サイズから容量を計算し、必要なら自動分割します。自動分割後の6ページ超過は許可します。文字幅は既存の保守的な1文字1em折返しを使用します。タイトルは各ページへ表示します。
+表示時間はメモごとに保存され、未設定の旧メモは3秒。APIはtitle/content/pageSecondsを受け、pageCount/pageSeconds/総durationを返します。生成するのは1周分だけです。PiPの一時停止は現在フレームを止め、再開でページ送りを再開します（v0.9.0-devでiPhone Safari / Chrome実機確認済み。確認範囲はdocs/devlog/2026-09-09-multipage-pip.mdを参照）。
+ffmpegフィルターはjob内のpages.filterへ保存し、`-/filter:v`で読み込みます。このオプションに対応するビルドが必要です（今回ffmpeg 9で検証）。新しい固定LAN URLやPC固有パスは追加していません。クラウド移行は未実装です。

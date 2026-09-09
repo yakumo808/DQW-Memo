@@ -46,7 +46,6 @@ MAX_POST_BYTES = 1_000_000
 VIDEO_WIDTH = 640
 VIDEO_HEIGHT = 360
 VIDEO_FPS = 30
-VIDEO_DURATION = 4
 VIDEO_MIME = "video/mp4"
 
 
@@ -186,15 +185,47 @@ def text_layout(title: str, content: str) -> list[tuple[str, int, int]]:
     return rows
 
 
-def render_job(title: str, content: str) -> dict[str, Any]:
+PAGE_MARKER = "--- page ---"
+
+
+def page_layouts(title: str, content: str) -> list[list[tuple[str, int, int]]]:
+    manual = content.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    pages = [[]]
+    for line in manual:
+        if line == PAGE_MARKER:
+            pages.append([])
+        else:
+            pages[-1].append(line)
+    if len(pages) > 6:
+        raise ValueError("ページ数が多すぎます。手動ページは6ページまでです。")
+    title_lines = limited_lines(wrap_text(title, TEXT_WIDTH // 28), 2) if title else []
+    heading = [(line, 28, TEXT_MARGIN + i * 36) for i, line in enumerate(title_lines)]
+    body_y = TEXT_MARGIN + len(title_lines) * 36 + (12 if title_lines else 0)
+    result = []
+    for page in pages:
+        for size in BODY_FONT_SIZES:
+            lines = wrap_text("\n".join(page), TEXT_WIDTH // size)
+            capacity = max(1, (VIDEO_HEIGHT - TEXT_MARGIN - body_y) // (size + 6))
+            if len(lines) <= capacity:
+                break
+        for start in range(0, len(lines), capacity):
+            result.append(heading + [(line, size, body_y + i * (size + 6))
+                                     for i, line in enumerate(lines[start:start + capacity])])
+    return result
+
+
+def render_job(title: str, content: str, page_seconds: int = 3) -> dict[str, Any]:
+    if type(page_seconds) is not int or page_seconds not in (2, 3, 4, 5):
+        raise ValueError("表示時間は2、3、4、5秒から選択してください。")
+    page_layouts(title, content)  # Validate before creating a job.
     ensure_dirs()
     cleanup_jobs()
     job_id = safe_job_id()
     with active_job(job_id):
-        return _render_job(title, content, job_id)
+        return _render_job(title, content, job_id, page_seconds)
 
 
-def _render_job(title: str, content: str, job_id: str) -> dict[str, Any]:
+def _render_job(title: str, content: str, job_id: str, page_seconds: int = 3) -> dict[str, Any]:
     job_dir = JOBS_DIR / job_id
     job_dir.mkdir(parents=True, exist_ok=False)
 
@@ -209,31 +240,35 @@ def _render_job(title: str, content: str, job_id: str) -> dict[str, Any]:
     if not DEFAULT_FONT.exists():
         raise FileNotFoundError(f"font not found: {DEFAULT_FONT}")
 
-    # Use the same success-friendly delivery shape as D-1/D-2: 640x360, 30fps,
-    # H.264 High, yuv420p, faststart, AAC LC silence track, ~4s.
+    pages = page_layouts(title, content)
+    duration = len(pages) * page_seconds
     filters = []
-    for index, (line, size, top) in enumerate(text_layout(title, content)):
-        if not line:
-            continue
-        line_path = job_dir / f"layout-{index:02d}.txt"
-        write_text_file(line_path, line)
-        filters.append(
-            "drawtext="
-            f"fontfile='{escape_filter_path(DEFAULT_FONT)}':"
-            f"textfile='{escape_filter_path(line_path)}':expansion=none:"
-            f"fontsize={size}:fontcolor=white:x={TEXT_MARGIN}:y={top}:"
-            "shadowcolor=black@0.75:shadowx=2:shadowy=2:fix_bounds=1"
-        )
-    drawtext = ",".join(filters) or "null"
+    for page_index, rows in enumerate(pages):
+        for index, (line, size, top) in enumerate(rows):
+            if not line:
+                continue
+            line_path = job_dir / f"layout-{page_index:03d}-{index:02d}.txt"
+            write_text_file(line_path, line)
+            filters.append(
+                "drawtext="
+                f"fontfile='{escape_filter_path(DEFAULT_FONT)}':"
+                f"textfile='{escape_filter_path(line_path)}':expansion=none:"
+                f"fontsize={size}:fontcolor=white:x={TEXT_MARGIN}:y={top}:"
+                "shadowcolor=black@0.75:shadowx=2:shadowy=2:fix_bounds=1:"
+                f"enable='gte(t,{page_index * page_seconds})*lt(t,{(page_index + 1) * page_seconds})'"
+            )
+    # A file avoids platform command-line length limits for long notes.
+    filter_path = job_dir / "pages.filter"
+    write_text_file(filter_path, ",".join(filters) or "null")
 
     cmd = [
         FFMPEG,
         "-y",
         "-f", "lavfi",
-        "-i", f"color=c=0x1f2937:s={VIDEO_WIDTH}x{VIDEO_HEIGHT}:r={VIDEO_FPS}:d={VIDEO_DURATION}",
+        "-i", f"color=c=0x1f2937:s={VIDEO_WIDTH}x{VIDEO_HEIGHT}:r={VIDEO_FPS}:d={duration}",
         "-f", "lavfi",
         "-i", "anullsrc=r=48000:cl=stereo",
-        "-vf", drawtext,
+        "-/filter:v", str(filter_path),
         "-c:v", "libx264",
         "-profile:v", "high",
         "-pix_fmt", "yuv420p",
@@ -271,7 +306,9 @@ def _render_job(title: str, content: str, job_id: str) -> dict[str, Any]:
         "videoUrl": f"/videos/{job_id}.mp4",
         "width": VIDEO_WIDTH,
         "height": VIDEO_HEIGHT,
-        "duration": VIDEO_DURATION,
+        "duration": duration,
+        "pageCount": len(pages),
+        "pageSeconds": page_seconds,
         "mimeType": VIDEO_MIME,
     }
 
@@ -338,6 +375,9 @@ class RenderHandler(SimpleHTTPRequestHandler):
             )
             return
 
+        if not isinstance(payload, dict):
+            self._send_json(HTTPStatus.BAD_REQUEST, {"ok": False, "errorCode": "INVALID_FIELDS", "message": "JSON object required"})
+            return
         title = payload.get("title", "")
         content = payload.get("content", "")
         if not isinstance(title, str) or not isinstance(content, str):
@@ -348,7 +388,10 @@ class RenderHandler(SimpleHTTPRequestHandler):
             return
 
         try:
-            result = render_job(title, content)
+            result = render_job(title, content, payload.get("pageSeconds", 3))
+        except ValueError as exc:
+            self._send_json(HTTPStatus.BAD_REQUEST, {"ok": False, "errorCode": "INVALID_PAGES", "message": str(exc)})
+            return
         except FileNotFoundError as exc:
             self._send_json(
                 HTTPStatus.INTERNAL_SERVER_ERROR,

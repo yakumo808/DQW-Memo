@@ -1,3 +1,4 @@
+import { copyText } from './clipboard.js';
 // @ts-check
 import { MemoRepository } from '../api.js';
 
@@ -16,8 +17,12 @@ export function EditorUI(container, memo, callbacks) {
       <input type="text" id="memo-title" placeholder="タイトル" />
       <label for="memo-content">本文</label>
       <textarea id="memo-content" rows="8" placeholder="メモの内容を入力してください"></textarea>
+      <button id="copy-page" class="btn btn-ghost" type="button">改ページをコピー</button>
+      <span id="copy-page-status" role="status"></span>
       <div id="status" class="editor-status" role="status" aria-live="polite" aria-atomic="true"></div>
       <div class="editor-actions">
+        <label for="page-seconds">1ページの表示時間</label>
+        <select id="page-seconds" class="btn"><option value="2">2秒</option><option value="3" selected>3秒</option><option value="4">4秒</option><option value="5">5秒</option></select>
         <button id="btn-pip" class="btn btn-primary" aria-describedby="status">動画を準備</button>
         <div class="controls editor-secondary">
           <button id="btn-save" class="btn btn-success">保存</button>
@@ -34,12 +39,20 @@ export function EditorUI(container, memo, callbacks) {
   const btnPip = container.querySelector('#btn-pip');
   const statusEl = container.querySelector('#status');
 
+  const seconds = container.querySelector('#page-seconds');
+  seconds.value = String([2,3,4,5].includes(memo?.pageSeconds) ? memo.pageSeconds : 3);
+  container.querySelector('#copy-page').addEventListener('click', async () => {
+    const feedback = container.querySelector('#copy-page-status');
+    try { await copyText('--- page ---'); feedback.textContent = 'コピーしました'; }
+    catch (_) { feedback.textContent = 'コピーに失敗しました'; }
+  });
   const emitChange = () => {
     if (callbacks.onChange) {
       callbacks.onChange({
         id: localMemoId,
         title: titleInput.value,
-        content: contentInput.value
+        content: contentInput.value,
+        pageSeconds: Number(seconds.value)
       });
     }
   };
@@ -50,6 +63,7 @@ export function EditorUI(container, memo, callbacks) {
     localMemoId = memo.id || null;
   }
 
+  seconds.addEventListener('change', emitChange);
   titleInput.addEventListener('input', emitChange);
   contentInput.addEventListener('input', emitChange);
 
@@ -59,9 +73,9 @@ export function EditorUI(container, memo, callbacks) {
     let saved = null;
 
     if (localMemoId) {
-      saved = MemoRepository.update(localMemoId, { title, content });
+      saved = MemoRepository.update(localMemoId, { title, content, pageSeconds: Number(seconds.value) });
     } else {
-      saved = MemoRepository.save({ title, content });
+      saved = MemoRepository.save({ title, content, pageSeconds: Number(seconds.value) });
       localMemoId = saved.id;
     }
 
@@ -82,7 +96,8 @@ export function EditorUI(container, memo, callbacks) {
       callbacks.onPip({
         id: localMemoId,
         title: titleInput.value,
-        content: contentInput.value
+        content: contentInput.value,
+        pageSeconds: Number(seconds.value)
       });
     }
   });

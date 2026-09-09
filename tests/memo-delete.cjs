@@ -35,7 +35,7 @@ let browser;
     await page.setViewport({width,height:844});
     await page.goto(`http://127.0.0.1:${server.address().port}`);
     await seed(3);
-    assert.equal(await page.$eval('.dev-version',e=>e.textContent),'v0.8.3.2-dev');
+    assert.equal(await page.$eval('.dev-version',e=>e.textContent),'v0.9.0-dev');
     assert.ok(await page.$eval('.dev-version',e=>e.getBoundingClientRect().right<=innerWidth));
     await drag(0,-100);
     assert.equal(await page.$$eval('.delete-open',a=>a.length),1);

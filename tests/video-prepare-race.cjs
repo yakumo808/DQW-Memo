@@ -147,7 +147,7 @@ const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
   const oldUrl = await page.$eval('#pip-video', v => v.src);
   const prepares = await page.evaluate(() => probe.prepares);
   await edit('prepare中の新本文'); await run();
-  await page.waitForFunction(() => document.querySelector('#log-box').textContent.includes('CACHE STORED メモA\nprepare中の新本文'));
+  await page.waitForFunction(() => document.querySelector('#log-box').textContent.includes('CACHE STORED '+JSON.stringify(['pages-v2','メモA','prepare中の新本文',3])));
   assert.equal(await page.evaluate(() => probe.prepares), prepares);
   await release(); await ready();
   assert.notEqual(await page.$eval('#pip-video', v => v.src), oldUrl);
@@ -197,14 +197,14 @@ const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
   });
   const renders = await page.evaluate(() => probe.renders);
   for (const record of records) {
-    const matches = renders.filter(r => `${r.input.title}\n${r.input.content}\nv1` === record.key);
+    const matches = renders.filter(r => JSON.stringify(['pages-v2',r.input.title,r.input.content,r.input.pageSeconds]) === record.key);
     assert.ok(matches.length, `unknown cache key ${record.key}`);
     assert.ok(matches.some(r => {
       assert.equal(fs.readFileSync(r.result.inputTxt, 'utf8'), `${r.input.title}\n\n${r.input.content}`);
       return crypto.createHash('sha256').update(fs.readFileSync(r.result.outputMp4)).digest('hex') === record.sha;
     }), `wrong video for key ${record.key}`);
   }
-  assert.ok(records.some(r => r.key === 'メモA\nput旧本文\nv1'));
+  assert.ok(records.some(r => r.key === JSON.stringify(['pages-v2','メモA','put旧本文',3])));
   assert.ok(!records.some(r => /検索中に変更|render中の新本文/.test(r.key)));
   pass(`7 cache key -> POST -> input.txt -> generated MP4 SHA256 matches all ${records.length} cached Blobs`);
   assert.deepEqual(errors, []);
